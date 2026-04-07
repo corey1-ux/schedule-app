@@ -1,0 +1,47 @@
+{% extends "layout.html" %}
+{% block title %}Admin — IR Schedule{% endblock %}
+
+{% block content %}
+<h2>Admin Dashboard</h2>
+
+<h3>Schedules ({{ schedules|length }})</h3>
+<a href="#">+ New Schedule</a>
+{% if schedules %}
+<table border="1" cellpadding="4">
+  <thead>
+    <tr><th>#</th><th>Title</th><th>Start</th><th>End</th><th>Created By</th></tr>
+  </thead>
+  <tbody>
+    {% for s in schedules %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.title }}</td>
+      <td>{{ s.start_time }}</td>
+      <td>{{ s.end_time }}</td>
+      <td>{{ s.creator or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No schedules yet.</p>
+{% endif %}
+
+<hr />
+
+<h3>Users ({{ users|length }})</h3>
+<table border="1" cellpadding="4">
+  <thead>
+    <tr><th>#</th><th>Username</th><th>Role</th></tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.id }}</td>
+      <td>{{ u.username }}</td>
+      <td>{{ u.role }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

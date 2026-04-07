@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — IR Schedule</title>
+</head>
+<body>
+
+  <h2>IR Schedule — Login</h2>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <p><strong>{{ message }}</strong></p>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST" action="{{ url_for('login') }}">
+    <div>
+      <label for="username">Username</label><br />
+      <input type="text" id="username" name="username" required autofocus />
+    </div>
+    <br />
+    <div>
+      <label for="password">Password</label><br />
+      <input type="password" id="password" name="password" required />
+    </div>
+    <br />
+    <button type="submit">Sign In</button>
+  </form>
+
+</body>
+</html>

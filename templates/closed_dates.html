@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% block title %}Closed Dates — IR Schedule{% endblock %}
+
+{% block content %}
+<h2>Closed Dates</h2>
+<p>Dates marked as closed will be skipped during schedule generation.</p>
+
+<form method="POST" action="{{ url_for('add_closed_date') }}">
+  <label>Date: <input type="date" name="date" required /></label>
+  <button type="submit">Add Closed Date</button>
+</form>
+
+<hr />
+
+{% if closed_dates %}
+<table border="1" cellpadding="6">
+  <thead>
+    <tr><th>Date</th><th>Day</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for d in closed_dates %}
+    <tr>
+      <td>{{ d }}</td>
+      <td>
+        {% set weekdays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}
+        {# Python's weekday(): 0=Mon. We use a trick via date arithmetic in the template #}
+        {{ d }}
+      </td>
+      <td>
+        <form method="POST" action="{{ url_for('delete_closed_date', date=d) }}"
+              onsubmit="return confirm('Remove {{ d }}?');">
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No closed dates set.</p>
+{% endif %}
+{% endblock %}

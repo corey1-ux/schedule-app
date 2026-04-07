@@ -1,0 +1,135 @@
+{% extends "layout.html" %}
+{% block title %}Schedule Template — IR Schedule{% endblock %}
+
+{% block content %}
+<h2>Weekly Schedule Template</h2>
+
+{% if not skills %}
+<p><strong>No skills defined yet.</strong> <a href="{{ url_for('skills') }}">Add skills first.</a></p>
+{% else %}
+
+<!-- ── Section 1: Skill fill priority ─────────────────────────── -->
+<h3>1. Skill Fill Priority</h3>
+<p>Lower number = filled first. 0 = no priority set.</p>
+
+<form method="POST" action="{{ url_for('save_priorities') }}">
+  <table border="1" cellpadding="6">
+    <thead>
+      <tr><th>Skill</th><th>Priority</th></tr>
+    </thead>
+    <tbody>
+      {% for skill in skills %}
+      <tr>
+        <td><strong>{{ skill.name }}</strong></td>
+        <td>
+          <input type="number" name="priority__{{ skill.id }}"
+                 value="{{ skill.priority }}" min="0" max="99" style="width:60px;" />
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <br />
+  <button type="submit">Save Skill Priorities</button>
+</form>
+
+<hr />
+
+<!-- ── Section 2: Day fill priority ───────────────────────────── -->
+<h3>2. Day Fill Priority</h3>
+<p>Lower number = filled first. 0 = no priority set.</p>
+
+<form method="POST" action="{{ url_for('save_day_priorities') }}">
+  <table border="1" cellpadding="6">
+    <thead>
+      <tr><th>Day</th><th>Priority</th></tr>
+    </thead>
+    <tbody>
+      {% for day in days %}
+      <tr>
+        <td><strong>{{ day }}</strong></td>
+        <td>
+          <input type="number" name="day_priority__{{ day }}"
+                 value="{{ day_priorities[day] }}" min="0" max="99" style="width:60px;" />
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <br />
+  <button type="submit">Save Day Priorities</button>
+</form>
+
+<hr />
+
+<!-- ── Section 3: Weekly needs grid ───────────────────────────── -->
+<h3>3. Weekly Needs</h3>
+<p>Enter how many staff with each skill are needed per day. Set to 0 for none.</p>
+
+<form method="POST" action="{{ url_for('save_needs') }}">
+  <table border="1" cellpadding="6">
+    <thead>
+      <tr>
+        <th>Skill</th>
+        {% for day in days %}
+          <th>{{ day[:3] }}<br /><small>Pri: {{ day_priorities[day] or '—' }}</small></th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for skill in skills %}
+      <tr>
+        <td><strong>{{ skill.name }}</strong><br /><small>Pri: {{ skill.priority or '—' }}</small></td>
+        {% for day in days %}
+        <td>
+          <input type="number"
+                 name="need__{{ day }}__{{ skill.id }}"
+                 value="{{ needs[day][skill.id] if skill.id in needs[day] else 0 }}"
+                 min="0" max="99" style="width:50px;" />
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <br />
+  <button type="submit">Save Needs</button>
+</form>
+
+<form method="POST" action="{{ url_for('clear_needs') }}"
+      onsubmit="return confirm('Clear all needs from the template?');"
+      style="display:inline;">
+  <button type="submit">Delete All Needs</button>
+</form>
+
+<hr />
+
+<!-- ── Section 4: Summary ─────────────────────────────────────── -->
+<h3>Summary</h3>
+<table border="1" cellpadding="4">
+  <thead>
+    <tr><th>Day (Pri)</th><th>Needs (in skill priority order)</th></tr>
+  </thead>
+  <tbody>
+    {% for day in days_sorted %}
+    <tr>
+      <td><strong>{{ day }}</strong> ({{ day_priorities[day] or '—' }})</td>
+      <td>
+        {% set day_needs = needs[day] %}
+        {% if day_needs %}
+          {% for skill in skills %}
+            {% if skill.id in day_needs %}
+              {{ skill.name }} x{{ day_needs[skill.id] }} (pri {{ skill.priority or '—' }}){% if not loop.last %}, {% endif %}
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <em>No needs set</em>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endif %}
+{% endblock %}

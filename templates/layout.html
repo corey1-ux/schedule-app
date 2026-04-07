@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}IR Schedule{% endblock %}</title>
+</head>
+<body>
+
+  {% if session.get('user_id') %}
+  <nav>
+    <strong>IR Schedule</strong> |
+    {% if session.get('role') == 'admin' %}
+      <a href="{{ url_for('admin') }}">Admin</a> |
+      <a href="{{ url_for('staff') }}">Staff</a> |
+      <a href="{{ url_for('skills') }}">Skills</a> |
+      <a href="{{ url_for('schedule') }}">Schedule</a>
+      <a href="{{ url_for('schedule_template') }}">Schedule Template</a> |
+    {% endif %}
+    <span>{{ session.get('username') }} ({{ session.get('role') }})</span> |
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </nav>
+  <hr />
+  {% endif %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <p><strong>[{{ category }}] {{ message }}</strong></p>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+
+</body>
+</html>

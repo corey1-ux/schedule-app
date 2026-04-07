@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+{% block title %}Staff — IR Schedule{% endblock %}
+
+{% block content %}
+<h2>Staff</h2>
+
+<p>Total Staff: {{ staff|length }} | Total FTE: {{ "%.2f"|format(staff|sum(attribute='fte')) }}</p>
+
+<form method="POST" action="{{ url_for('add_staff') }}">
+  <h3>Add Staff Member</h3>
+  <div>
+    <label>Name: <input type="text" name="name" required /></label>
+  </div>
+  <div>
+    <label>FTE: <input type="number" name="fte" value="1.0" min="0.1" max="1.0" step="0.05" required /></label>
+  </div>
+  <div>
+    <label>Skills:</label><br />
+    {% if skills %}
+      {% for skill in skills %}
+        <label>
+          <input type="checkbox" name="skill_ids" value="{{ skill.id }}" />
+          {{ skill.name }}
+        </label><br />
+      {% endfor %}
+    {% else %}
+      <em>No skills defined yet. <a href="{{ url_for('skills') }}">Add skills first.</a></em>
+    {% endif %}
+  </div>
+  <br />
+  <button type="submit">Add Staff</button>
+</form>
+
+<hr />
+
+{% if staff %}
+<table border="1" cellpadding="4">
+  <thead>
+    <tr><th>#</th><th>Name</th><th>Skills</th><th>FTE</th><th>Added</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for member in staff %}
+    <tr>
+      <td>{{ member.id }}</td>
+      <td>{{ member.name }}</td>
+      <td>
+        {% if member.skills %}
+          {% for sk in member.skills %}{{ sk.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}—{% endif %}
+      </td>
+      <td>{{ "%.2f"|format(member.fte) }}</td>
+      <td>{{ member.created_at[:10] }}</td>
+      <td>
+        <form method="POST" action="{{ url_for('delete_staff', staff_id=member.id) }}"
+              onsubmit="return confirm('Remove {{ member.name }}?');">
+          <button type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No staff members yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+{% block title %}Schedule — IR Schedule{% endblock %}
+
+{% block head %}
+<!-- React ecosystem via unpkg — reliable UMD builds -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+<script src="https://unpkg.com/moment@2/moment.min.js"></script>
+<!-- react-big-calendar UMD build -->
+<script src="https://unpkg.com/react-big-calendar@1/lib/react-big-calendar.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/react-big-calendar@1/lib/css/react-big-calendar.css" />
+<!-- Babel standalone to compile JSX in the browser -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  #calendar-root { height: 650px; margin-top: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Schedule</h2>
+
+<form method="POST" action="{{ url_for('run_generate_schedule') }}" style="display:flex;align-items:center;gap:1rem;">
+  <label>Month: <input type="month" name="month" value="{{ default_month }}" required /></label>
+  <button type="submit">Generate Schedule</button>
+</form>
+
+{% if generated_at %}
+  <p><small>Last generated: {{ generated_at }}{% if month_start %} for {{ month_start[:7] }}{% endif %}</small></p>
+{% endif %}
+
+{% if not has_schedule %}
+<p>No schedule generated yet. Pick a month and click <strong>Generate Schedule</strong>.</p>
+{% else %}
+
+<div id="calendar-root"></div>
+
+{% if unmet %}
+{% set any_unmet = namespace(found=false) %}
+{% for d, v in unmet.items() %}{% if v %}{% set any_unmet.found = true %}{% endif %}{% endfor %}
+{% if any_unmet.found %}
+<hr />
+<h3>⚠ Unmet Needs</h3>
+<table border="1" cellpadding="6">
+  <thead><tr><th>Date</th><th>Skill</th><th>Unfilled Slots</th></tr></thead>
+  <tbody>
+    {% for date_str in unmet | sort %}
+      {% for skill_name, count in unmet[date_str].items() %}
+      <tr><td>{{ date_str }}</td><td>{{ skill_name }}</td><td>{{ count }}</td></tr>
+      {% endfor %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+
+<script>var INITIAL_DATE = '{{ month_start }}';</script>
+<script type="text/babel">
+{% raw %}
+const { useState, useEffect } = React;
+const { Calendar, momentLocalizer } = ReactBigCalendar;
+const localizer = momentLocalizer(moment);
+
+function ScheduleCalendar() {
+  const [events, setEvents]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [defaultDate, setDefault] = useState(new Date(INITIAL_DATE));
+
+  useEffect(() => {
+    fetch('/schedule/events', { credentials: 'same-origin' })
+      .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(data => {
+        const mapped = data.map(e => ({
+          title:  e.title,
+          start:  new Date(e.start + 'T00:00:00'),
+          end:    new Date(e.end   + 'T23:59:59'),
+          allDay: true,
+        }));
+        setEvents(mapped);
+        if (mapped.length > 0) setDefault(mapped[0].start);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <p>Loading calendar...</p>;
+  if (error)   return <p style={{color: 'red'}}>Error: {error}</p>;
+
+  return (
+    <Calendar
+      localizer={localizer}
+      events={events}
+      defaultView="month"
+      views={['month', 'week', 'agenda']}
+      defaultDate={defaultDate}
+      style={{ height: 650 }}
+    />
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('calendar-root'));
+root.render(<ScheduleCalendar />);
+{% endraw %}
+</script>
+
+{% endif %}
+{% endblock %}
