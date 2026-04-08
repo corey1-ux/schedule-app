@@ -5,7 +5,7 @@
 <h2>Closed Dates</h2>
 <p>Dates marked as closed will be skipped during schedule generation.</p>
 
-<form method="POST" action="{{ url_for('add_closed_date') }}">
+<form method="POST" action="{{ url_for('schedule.add_closed_date') }}">
   <label>Date: <input type="date" name="date" required /></label>
   <button type="submit">Add Closed Date</button>
 </form>
@@ -27,7 +27,7 @@
         {{ d }}
       </td>
       <td>
-        <form method="POST" action="{{ url_for('delete_closed_date', date=d) }}"
+        <form method="POST" action="{{ url_for('schedule.delete_closed_date', date=d) }}"
               onsubmit="return confirm('Remove {{ d }}?');">
           <button type="submit">Remove</button>
         </form>

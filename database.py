@@ -1,0 +1,114 @@
+import sqlite3
+
+DATABASE = "ir_schedule.db"
+
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db():
+    with get_db() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                username  TEXT    NOT NULL UNIQUE,
+                password  TEXT    NOT NULL,
+                role      TEXT    NOT NULL DEFAULT 'user'
+            );
+            CREATE TABLE IF NOT EXISTS skills (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL UNIQUE,
+                priority   INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS staff (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL,
+                fte        REAL    NOT NULL DEFAULT 1.0,
+                created_at TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS staff_skills (
+                staff_id   INTEGER NOT NULL REFERENCES staff(id)  ON DELETE CASCADE,
+                skill_id   INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                PRIMARY KEY (staff_id, skill_id)
+            );
+            CREATE TABLE IF NOT EXISTS schedules (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT    NOT NULL,
+                description TEXT,
+                start_time  TEXT    NOT NULL,
+                end_time    TEXT    NOT NULL,
+                created_by  INTEGER REFERENCES users(id),
+                created_at  TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS schedule_templates (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL UNIQUE,
+                created_at TEXT    DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS template_needs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id INTEGER NOT NULL REFERENCES schedule_templates(id) ON DELETE CASCADE,
+                day_of_week TEXT    NOT NULL,
+                skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                quantity    INTEGER NOT NULL DEFAULT 1,
+                UNIQUE (template_id, day_of_week, skill_id)
+            );
+            CREATE TABLE IF NOT EXISTS day_priority (
+                day_of_week TEXT    PRIMARY KEY,
+                priority    INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS generated_schedule (
+                id           INTEGER PRIMARY KEY CHECK (id = 1),
+                result_json  TEXT,
+                month_start  TEXT,
+                generated_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS closed_dates (
+                date TEXT PRIMARY KEY
+            );
+        """)
+
+        # Migrations
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(skills)").fetchall()]
+        if "priority" not in cols:
+            conn.execute("ALTER TABLE skills ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
+
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+        if "generated_schedule" not in tables:
+            conn.execute("""
+                CREATE TABLE generated_schedule (
+                    id           INTEGER PRIMARY KEY CHECK (id = 1),
+                    result_json  TEXT,
+                    month_start  TEXT,
+                    generated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+        else:
+            gs_cols = [r[1] for r in conn.execute("PRAGMA table_info(generated_schedule)").fetchall()]
+            if "month_start" not in gs_cols:
+                conn.execute("ALTER TABLE generated_schedule ADD COLUMN month_start TEXT")
+
+        if "closed_dates" not in tables:
+            conn.execute("CREATE TABLE closed_dates (date TEXT PRIMARY KEY)")
+
+        # Seed admin
+        if not conn.execute("SELECT id FROM users WHERE username='admin'").fetchone():
+            conn.execute(
+                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                ("admin", "admin123", "admin")
+            )
+
+        # Seed day priorities
+        for day in ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO day_priority (day_of_week, priority) VALUES (?, 0)", (day,)
+            )
+
+        conn.commit()

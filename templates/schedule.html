@@ -20,7 +20,7 @@
 {% block content %}
 <h2>Schedule</h2>
 
-<form method="POST" action="{{ url_for('run_generate_schedule') }}" style="display:flex;align-items:center;gap:1rem;">
+<form method="POST" action="{{ url_for('schedule.run_generate_schedule') }}" style="display:flex;align-items:center;gap:1rem;">
   <label>Month: <input type="month" name="month" value="{{ default_month }}" required /></label>
   <button type="submit">Generate Schedule</button>
 </form>

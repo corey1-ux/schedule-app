@@ -6,7 +6,7 @@
 
 <p>Total Staff: {{ staff|length }} | Total FTE: {{ "%.2f"|format(staff|sum(attribute='fte')) }}</p>
 
-<form method="POST" action="{{ url_for('add_staff') }}">
+<form method="POST" action="{{ url_for('staff.add_staff') }}">
   <h3>Add Staff Member</h3>
   <div>
     <label>Name: <input type="text" name="name" required /></label>
@@ -24,7 +24,7 @@
         </label><br />
       {% endfor %}
     {% else %}
-      <em>No skills defined yet. <a href="{{ url_for('skills') }}">Add skills first.</a></em>
+      <em>No skills defined yet. <a href="{{ url_for('skills.skills') }}">Add skills first.</a></em>
     {% endif %}
   </div>
   <br />
@@ -51,7 +51,7 @@
       <td>{{ "%.2f"|format(member.fte) }}</td>
       <td>{{ member.created_at[:10] }}</td>
       <td>
-        <form method="POST" action="{{ url_for('delete_staff', staff_id=member.id) }}"
+        <form method="POST" action="{{ url_for('staff.delete_staff', staff_id=member.id) }}"
               onsubmit="return confirm('Remove {{ member.name }}?');">
           <button type="submit">Delete</button>
         </form>

@@ -5,14 +5,14 @@
 <h2>Weekly Schedule Template</h2>
 
 {% if not skills %}
-<p><strong>No skills defined yet.</strong> <a href="{{ url_for('skills') }}">Add skills first.</a></p>
+<p><strong>No skills defined yet.</strong> <a href="{{ url_for('skills.skills') }}">Add skills first.</a></p>
 {% else %}
 
 <!-- ── Section 1: Skill fill priority ─────────────────────────── -->
 <h3>1. Skill Fill Priority</h3>
 <p>Lower number = filled first. 0 = no priority set.</p>
 
-<form method="POST" action="{{ url_for('save_priorities') }}">
+<form method="POST" action="{{ url_for('schedule_template.save_priorities') }}">
   <table border="1" cellpadding="6">
     <thead>
       <tr><th>Skill</th><th>Priority</th></tr>
@@ -39,7 +39,7 @@
 <h3>2. Day Fill Priority</h3>
 <p>Lower number = filled first. 0 = no priority set.</p>
 
-<form method="POST" action="{{ url_for('save_day_priorities') }}">
+<form method="POST" action="{{ url_for('schedule_template.save_day_priorities') }}">
   <table border="1" cellpadding="6">
     <thead>
       <tr><th>Day</th><th>Priority</th></tr>
@@ -66,7 +66,7 @@
 <h3>3. Weekly Needs</h3>
 <p>Enter how many staff with each skill are needed per day. Set to 0 for none.</p>
 
-<form method="POST" action="{{ url_for('save_needs') }}">
+<form method="POST" action="{{ url_for('schedule_template.save_needs') }}">
   <table border="1" cellpadding="6">
     <thead>
       <tr>
@@ -96,7 +96,7 @@
   <button type="submit">Save Needs</button>
 </form>
 
-<form method="POST" action="{{ url_for('clear_needs') }}"
+<form method="POST" action="{{ url_for('schedule_template.clear_needs') }}"
       onsubmit="return confirm('Clear all needs from the template?');"
       style="display:inline;">
   <button type="submit">Delete All Needs</button>

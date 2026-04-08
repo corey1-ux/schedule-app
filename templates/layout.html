@@ -11,14 +11,15 @@
   <nav>
     <strong>IR Schedule</strong> |
     {% if session.get('role') == 'admin' %}
-      <a href="{{ url_for('admin') }}">Admin</a> |
-      <a href="{{ url_for('staff') }}">Staff</a> |
-      <a href="{{ url_for('skills') }}">Skills</a> |
-      <a href="{{ url_for('schedule') }}">Schedule</a>
-      <a href="{{ url_for('schedule_template') }}">Schedule Template</a> |
+      <a href="{{ url_for('admin.dashboard') }}">Admin</a> |
+      <a href="{{ url_for('staff.staff') }}">Staff</a> |
+      <a href="{{ url_for('skills.skills') }}">Skills</a> |
+      <a href="{{ url_for('schedule_template.schedule_template') }}">Schedule Template</a> |
+      <a href="{{ url_for('schedule.schedule') }}">Schedule</a> |
+      <a href="{{ url_for('schedule.closed_dates') }}">Closed Dates</a> |
     {% endif %}
     <span>{{ session.get('username') }} ({{ session.get('role') }})</span> |
-    <a href="{{ url_for('logout') }}">Logout</a>
+    <a href="{{ url_for('auth.logout') }}">Logout</a>
   </nav>
   <hr />
   {% endif %}
