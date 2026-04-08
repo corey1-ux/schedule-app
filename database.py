@@ -112,3 +112,58 @@ def init_db():
             )
 
         conn.commit()
+
+
+def init_blocks_db():
+    """Add block-related tables — called from init_db."""
+    with get_db() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS schedule_blocks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL,
+                start_date TEXT    NOT NULL,
+                end_date   TEXT    NOT NULL,
+                status     TEXT    NOT NULL DEFAULT 'draft'
+            );
+
+            CREATE TABLE IF NOT EXISTS staff_requests (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_id INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+                date     TEXT    NOT NULL,
+                skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                UNIQUE (block_id, staff_id, date, skill_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS staff_unavailability (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_id INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+                date     TEXT    NOT NULL,
+                UNIQUE (block_id, staff_id, date)
+            );
+
+            CREATE TABLE IF NOT EXISTS rotation_history (
+                staff_id  INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+                skill_id  INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                last_date TEXT    NOT NULL,
+                PRIMARY KEY (staff_id, skill_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_minimums (
+                skill_id      INTEGER PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
+                minimum_count INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS staff_block_config (
+                block_id         INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id         INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+                fte_start_week   TEXT    NOT NULL DEFAULT 'low',
+                PRIMARY KEY (block_id, staff_id)
+            );
+            CREATE TABLE IF NOT EXISTS optimized_schedule (
+                block_id     INTEGER PRIMARY KEY REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                result_json  TEXT,
+                optimized_at TEXT DEFAULT (datetime('now'))
+            );
+        """)
+        conn.commit()
