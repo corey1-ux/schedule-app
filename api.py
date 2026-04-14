@@ -435,7 +435,44 @@ def get_optimized(block_id):
     })
 
 
-@bp.route("/blocks/<int:block_id>/publish", methods=["POST"])
+@bp.route("/blocks/<int:block_id>/accept_optimized", methods=["POST"])
+def accept_optimized(block_id):
+    """Replace staff_requests with optimizer output. The optimizer output is the new grid."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT result_json FROM optimized_schedule WHERE block_id = ?", (block_id,)
+        ).fetchone()
+        if not row or not row["result_json"]:
+            return jsonify({"error": "No optimized schedule found"}), 422
+
+        result = json.loads(row["result_json"])
+        result.pop("unmet", None)
+
+        skills = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM skills").fetchall()}
+        staff  = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM staff").fetchall()}
+
+        # Replace all requests with optimizer output
+        conn.execute("DELETE FROM staff_requests WHERE block_id = ?", (block_id,))
+
+        added = 0
+        for date_str, day in result.items():
+            for skill_name, names in day.items():
+                skill_id = skills.get(skill_name)
+                if not skill_id:
+                    continue
+                for name in names:
+                    staff_id = staff.get(name)
+                    if not staff_id:
+                        continue
+                    conn.execute("""
+                        INSERT INTO staff_requests (block_id, staff_id, date, skill_id)
+                        VALUES (?, ?, ?, ?)
+                    """, (block_id, staff_id, date_str, skill_id))
+                    added += 1
+
+        conn.commit()
+
+    return jsonify({"ok": True, "added": added})
 def publish_block(block_id):
     """
     Publish a block: copy optimized schedule to the calendar events
@@ -483,3 +520,110 @@ def get_optimized_events(block_id):
                 "staff": names,
             })
     return jsonify(events)
+
+
+# ── Test Runner ──────────────────────────────────────────────────────────────
+
+@bp.route("/run_tests", methods=["POST"])
+def run_tests():
+    """Run the adversarial test suite and return results as JSON."""
+    import sys, os, io, contextlib
+    from datetime import date as dt_date, timedelta
+    from collections import defaultdict
+
+    # Capture all output
+    output_buffer = io.StringIO()
+    tests   = []
+    current = None
+    r       = {"passed": 0, "failed": 0, "warned": 0}
+
+    def check(name, condition, detail=""):
+        status = "pass" if condition else "fail"
+        text   = name + (f": {detail}" if detail and not condition else "")
+        label  = "PASS" if condition else "FAIL"
+        line   = f"  {label} {text}"
+        output_buffer.write(line + "\n")
+        if current is not None:
+            current["checks"].append({"status": status, "text": text})
+        if condition:
+            r["passed"] += 1
+        else:
+            r["failed"] += 1
+
+    def warn(name, detail=""):
+        text = name + (f": {detail}" if detail else "")
+        output_buffer.write(f"  WARN {text}\n")
+        if current is not None:
+            current["checks"].append({"status": "warn", "text": text})
+        r["warned"] += 1
+
+    def section(title):
+        nonlocal current
+        if current is not None:
+            tests.append(current)
+        current = {"section": title, "checks": []}
+        output_buffer.write(f"\n-- {title}\n")
+
+    def run_opt(conn, block_id=1, time_limit=25):
+        from optimizer import optimize
+        import sys, os
+        devnull = open(os.devnull, 'w')
+        old_stderr = sys.stderr
+        sys.stderr = devnull
+        try:
+            return optimize(conn, block_id, time_limit_seconds=time_limit)
+        finally:
+            sys.stderr = old_stderr
+            devnull.close()
+
+    # Import helpers from test_adversarial
+    try:
+        import test_adversarial as ta
+    except ImportError:
+        return jsonify({"error": "test_adversarial.py not found in app directory"}), 404
+
+    # Override test_adversarial's globals with our capturing versions
+    ta.check        = check
+    ta.warn         = warn
+    ta.section      = section
+    ta.run_optimizer = run_opt
+    ta.results      = r
+
+    try:
+        ta.test_zero_slack()
+        ta.test_staff_unavailable_entire_block()
+        ta.test_entire_pay_period_unavailable()
+        ta.test_two_staff_same_week_unavailable()
+        ta.test_block_starts_friday()
+        ta.test_block_starts_sunday()
+        ta.test_only_one_tl_available()
+        ta.test_minimum_exceeds_qualified_staff()
+        ta.test_all_ecu_only_staff_unavailable()
+        ta.test_negative_required_shifts()
+        ta.test_fte_already_full_via_requests()
+        ta.test_all_staff_point_six_fte()
+        ta.test_multiple_optimizer_runs()
+        ta.test_rotation_history_affects_next_block()
+        ta.test_future_rotation_history()
+        ta.test_staff_with_no_skills()
+        ta.test_closed_date_in_middle()
+        ta.test_zero_quantity_template_need()
+        ta.test_all_days_closed()
+        ta.test_request_for_unqualified_skill()
+        ta.test_request_on_unavailable_day()
+        ta.test_two_staff_request_same_tl_slot()
+        ta.test_requests_exceed_fte()
+    except Exception as e:
+        import traceback
+        output_buffer.write(f"\nUnhandled error: {traceback.format_exc()}\n")
+
+    if current is not None:
+        tests.append(current)
+
+    return jsonify({
+        "tests":  tests,
+        "passed": r["passed"],
+        "failed": r["failed"],
+        "warned": r["warned"],
+        "raw":    output_buffer.getvalue(),
+    })
