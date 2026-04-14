@@ -473,6 +473,8 @@ def accept_optimized(block_id):
         conn.commit()
 
     return jsonify({"ok": True, "added": added})
+
+@bp.route('/blocks/<int:block_id>/publish', methods=['POST'])
 def publish_block(block_id):
     """
     Publish a block: copy optimized schedule to the calendar events
