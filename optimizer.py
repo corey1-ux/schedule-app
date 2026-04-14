@@ -47,7 +47,9 @@ def _load(conn, block_id):
     if not block:
         raise ValueError(f"Block {block_id} not found")
 
-    staff_rows = conn.execute("SELECT * FROM staff ORDER BY name").fetchall()
+    staff_rows = conn.execute(
+        "SELECT * FROM staff WHERE is_casual = 0 OR is_casual IS NULL ORDER BY name"
+    ).fetchall()
     staff = {}
     for s in staff_rows:
         skill_ids = set(
@@ -105,8 +107,14 @@ def _load(conn, block_id):
         (r["staff_id"], r["skill_id"]): r["last_date"] for r in rot_rows
     }
 
+    tier_rows = conn.execute(
+        "SELECT fte, shifts_per_week, shifts_per_pp FROM fte_tiers ORDER BY fte"
+    ).fetchall()
+    fte_tiers = [(r["fte"], r["shifts_per_week"], r["shifts_per_pp"]) for r in tier_rows]
+
     return (block, staff, skills, template_needs, skill_minimums,
-            day_priority, requests, unavailability, closed, rotation_history)
+            day_priority, requests, unavailability, closed, rotation_history,
+            fte_tiers)
 
 
 def _build_dates(block):
@@ -135,16 +143,22 @@ def _pay_periods(block):
     return periods
 
 
-def _fte_target(fte):
-    if fte >= 1.0:  return 8
-    if fte >= 0.75: return 6
-    return 5
-
-
-def _weekly_max(fte):
-    if fte >= 1.0:  return 4
-    if fte >= 0.75: return 3
-    return 3
+def _lookup_fte(fte_tiers, fte):
+    """
+    Return (shifts_per_week, shifts_per_pp) for the given FTE value.
+    Tries exact match first, then falls back to the nearest tier at or
+    below the requested FTE, then the lowest tier available.
+    """
+    sorted_tiers = sorted(fte_tiers, key=lambda t: t[0], reverse=True)
+    for tier_fte, weekly, pp in sorted_tiers:
+        if abs(tier_fte - fte) < 0.001:
+            return weekly, pp
+    for tier_fte, weekly, pp in sorted_tiers:
+        if tier_fte <= fte:
+            return weekly, pp
+    if sorted_tiers:
+        return sorted_tiers[-1][1], sorted_tiers[-1][2]
+    return 3, 5  # ultimate fallback
 
 
 def _rotation_penalty(staff_id, skill_id, rotation_history, weekday_dates):
@@ -176,7 +190,13 @@ def _staffing_weight(day_name, skill_id, day_priority, skill_prio):
 def optimize(conn, block_id, time_limit_seconds=60):
     (block, staff, skills, template_needs, skill_minimums,
      day_priority, requests, unavailability, closed,
-     rotation_history) = _load(conn, block_id)
+     rotation_history, fte_tiers) = _load(conn, block_id)
+
+    def fte_pp_target(fte):
+        return _lookup_fte(fte_tiers, fte)[1]
+
+    def fte_weekly_max(fte):
+        return _lookup_fte(fte_tiers, fte)[0]
 
     all_dates, weekday_dates = _build_dates(block)
     pay_periods = _pay_periods(block)
@@ -246,7 +266,7 @@ def optimize(conn, block_id, time_limit_seconds=60):
         if not any(skid in staff[sid]["skill_ids"] for skid in optimizer_skill_ids):
             continue
 
-        target        = _fte_target(staff[sid]["fte"])
+        target        = fte_pp_target(staff[sid]["fte"])
         unavail_dates = unavailability.get(sid, set())
 
         for p_start, p_end in pay_periods:
@@ -314,7 +334,7 @@ def optimize(conn, block_id, time_limit_seconds=60):
                 if isinstance(x[sid][date][skid], cp_model.IntVar)
             ]
             if week_vars:
-                model.Add(sum(week_vars) <= _weekly_max(fte))
+                model.Add(sum(week_vars) <= fte_weekly_max(fte))
 
         # Rotation: at most once per week per staff
         # Exception: staff whose only skill IS the rotation skill
@@ -368,7 +388,7 @@ def optimize(conn, block_id, time_limit_seconds=60):
         if len(skill_options) > 1:
             continue  # multi-skilled — soft FTE is fine
 
-        target        = _fte_target(staff[sid]["fte"])
+        target        = fte_pp_target(staff[sid]["fte"])
         unavail_dates = unavailability.get(sid, set())
 
         for p_start, p_end in pay_periods:
@@ -461,7 +481,7 @@ def optimize(conn, block_id, time_limit_seconds=60):
     # Weight is high enough to prefer full FTE but lower than staffing needs
     W_FTE_UNDER = 500
     for sid in staff_ids:
-        target        = _fte_target(staff[sid]["fte"])
+        target        = fte_pp_target(staff[sid]["fte"])
         unavail_dates = unavailability.get(sid, set())
 
         for p_start, p_end in pay_periods:
@@ -586,7 +606,7 @@ def optimize(conn, block_id, time_limit_seconds=60):
         # Diagnostics
         diag = []
         for sid in staff_ids:
-            target = _fte_target(staff[sid]["fte"])
+            target = fte_pp_target(staff[sid]["fte"])
             unavail_dates = unavailability.get(sid, set())
             valid_slots = sum(
                 1 for d in weekday_dates

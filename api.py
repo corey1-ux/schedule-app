@@ -113,12 +113,77 @@ def get_staff():
                 ORDER BY sk.name
             """, (s["id"],)).fetchall()
             result.append({
-                "id":     s["id"],
-                "name":   s["name"],
-                "fte":    s["fte"],
-                "skills": [{"id": sk["id"], "name": sk["name"]} for sk in skills],
+                "id":        s["id"],
+                "name":      s["name"],
+                "fte":       s["fte"],
+                "is_casual": bool(s["is_casual"]),
+                "skills":    [{"id": sk["id"], "name": sk["name"]} for sk in skills],
             })
     return jsonify(result)
+
+
+@bp.route("/staff", methods=["POST"])
+def create_staff():
+    data = request.get_json()
+    name      = (data.get("name") or "").strip()
+    skill_ids = data.get("skill_ids", [])
+    is_casual = bool(data.get("is_casual", False))
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    fte = 1.0
+    if not is_casual:
+        try:
+            fte = float(data.get("fte", 1.0))
+            if not (0.0 < fte <= 1.0):
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid FTE value"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO staff (name, fte, is_casual) VALUES (?, ?, ?)",
+            (name, fte, int(is_casual))
+        )
+        staff_id = cur.lastrowid
+        for sid in skill_ids:
+            conn.execute("INSERT INTO staff_skills (staff_id, skill_id) VALUES (?, ?)", (staff_id, sid))
+        conn.commit()
+    return jsonify({"ok": True, "id": staff_id})
+
+
+@bp.route("/staff/<int:staff_id>", methods=["PUT"])
+def update_staff(staff_id):
+    data      = request.get_json()
+    name      = (data.get("name") or "").strip()
+    skill_ids = data.get("skill_ids", [])
+    is_casual = bool(data.get("is_casual", False))
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    fte = 1.0
+    if not is_casual:
+        try:
+            fte = float(data.get("fte", 1.0))
+            if not (0.0 < fte <= 1.0):
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid FTE value"}), 400
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE staff SET name=?, fte=?, is_casual=? WHERE id=?",
+            (name, fte, int(is_casual), staff_id)
+        )
+        conn.execute("DELETE FROM staff_skills WHERE staff_id=?", (staff_id,))
+        for sid in skill_ids:
+            conn.execute("INSERT INTO staff_skills (staff_id, skill_id) VALUES (?, ?)", (staff_id, sid))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/staff/<int:staff_id>", methods=["DELETE"])
+def delete_staff(staff_id):
+    with get_db() as conn:
+        conn.execute("DELETE FROM staff WHERE id=?", (staff_id,))
+        conn.commit()
+    return jsonify({"ok": True})
 
 
 @bp.route("/skills")
@@ -215,10 +280,78 @@ def _pay_periods(block_start_str, block_end_str):
     return periods
 
 
-def _fte_target(fte):
-    if fte >= 1.0:  return 8
-    if fte >= 0.75: return 6
-    return 5  # 0.6 FTE
+def _fte_target(fte, tier_rows):
+    """Look up shifts-per-pay-period for the given FTE from preloaded tier rows."""
+    for row in tier_rows:          # rows ordered DESC by fte
+        if abs(row["fte"] - fte) < 0.001:
+            return row["shifts_per_pp"]
+    for row in tier_rows:
+        if row["fte"] <= fte:
+            return row["shifts_per_pp"]
+    return tier_rows[-1]["shifts_per_pp"] if tier_rows else 5
+
+
+# ── FTE tiers ─────────────────────────────────────────────────────────────────
+
+@bp.route("/fte-tiers")
+def get_fte_tiers():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT fte, shifts_per_week, shifts_per_pp FROM fte_tiers ORDER BY fte"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.route("/fte-tiers", methods=["POST"])
+def create_fte_tier():
+    data = request.get_json()
+    try:
+        fte    = round(float(data["fte"]), 4)
+        weekly = int(data["shifts_per_week"])
+        pp     = int(data["shifts_per_pp"])
+        if not (0.0 < fte <= 1.0) or weekly < 1 or pp < 1:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Invalid data"}), 400
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO fte_tiers (fte, shifts_per_week, shifts_per_pp) VALUES (?, ?, ?)",
+            (fte, weekly, pp)
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/fte-tiers/<fte_str>", methods=["PUT"])
+def update_fte_tier(fte_str):
+    data = request.get_json()
+    try:
+        fte    = round(float(fte_str), 4)
+        weekly = int(data["shifts_per_week"])
+        pp     = int(data["shifts_per_pp"])
+        if weekly < 1 or pp < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid data"}), 400
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE fte_tiers SET shifts_per_week=?, shifts_per_pp=? WHERE fte=?",
+            (weekly, pp, fte)
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/fte-tiers/<fte_str>", methods=["DELETE"])
+def delete_fte_tier(fte_str):
+    try:
+        fte = round(float(fte_str), 4)
+    except ValueError:
+        return jsonify({"error": "Invalid FTE"}), 400
+    with get_db() as conn:
+        conn.execute("DELETE FROM fte_tiers WHERE fte=?", (fte,))
+        conn.commit()
+    return jsonify({"ok": True})
 
 
 @bp.route("/blocks/<int:block_id>/validate_fte")
@@ -237,6 +370,9 @@ def validate_fte(block_id):
         unavail    = conn.execute(
             "SELECT staff_id, date FROM staff_unavailability WHERE block_id = ?", (block_id,)
         ).fetchall()
+        fte_tier_rows = conn.execute(
+            "SELECT fte, shifts_per_pp FROM fte_tiers ORDER BY fte DESC"
+        ).fetchall()
 
     worked = {}
     off    = {}
@@ -250,7 +386,7 @@ def validate_fte(block_id):
 
     for s in staff_rows:
         sid    = s["id"]
-        target = _fte_target(s["fte"])
+        target = _fte_target(s["fte"], fte_tier_rows)
 
         for i, (p_start, p_end) in enumerate(periods):
             # Collect Mon–Fri dates in this pay period

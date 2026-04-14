@@ -78,6 +78,10 @@ def init_db():
         if "priority" not in cols:
             conn.execute("ALTER TABLE skills ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
 
+        staff_cols = [r[1] for r in conn.execute("PRAGMA table_info(staff)").fetchall()]
+        if "is_casual" not in staff_cols:
+            conn.execute("ALTER TABLE staff ADD COLUMN is_casual INTEGER NOT NULL DEFAULT 0")
+
         tables = [r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()]
@@ -118,6 +122,12 @@ def init_blocks_db():
     """Add block-related tables — called from init_db."""
     with get_db() as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS fte_tiers (
+                fte              REAL    PRIMARY KEY,
+                shifts_per_week  INTEGER NOT NULL,
+                shifts_per_pp    INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS schedule_blocks (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 name       TEXT    NOT NULL,
@@ -166,4 +176,12 @@ def init_blocks_db():
                 optimized_at TEXT DEFAULT (datetime('now'))
             );
         """)
+
+        # Seed default FTE tiers (INSERT OR IGNORE so existing rows are kept)
+        for fte, weekly, pp in [(0.5, 2, 4), (0.6, 3, 5), (0.75, 3, 6), (1.0, 4, 8)]:
+            conn.execute(
+                "INSERT OR IGNORE INTO fte_tiers (fte, shifts_per_week, shifts_per_pp) VALUES (?, ?, ?)",
+                (fte, weekly, pp)
+            )
+
         conn.commit()
