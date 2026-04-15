@@ -612,23 +612,94 @@ def accept_optimized(block_id):
 
 @bp.route('/blocks/<int:block_id>/publish', methods=['POST'])
 def publish_block(block_id):
-    """
-    Publish a block: copy optimized schedule to the calendar events
-    and mark the block as published.
-    """
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM optimized_schedule WHERE block_id = ?", (block_id,)
+        block = conn.execute(
+            "SELECT * FROM schedule_blocks WHERE id=?", (block_id,)
         ).fetchone()
-        if not row or not row["result_json"]:
-            return jsonify({"error": "No optimized schedule found. Run optimizer first."}), 422
+        if not block:
+            return jsonify({"error": "Block not found"}), 404
+
+        # Build current snapshot from staff_requests
+        req_rows = conn.execute("""
+            SELECT sr.date, sk.name AS skill_name, st.name AS staff_name
+            FROM staff_requests sr
+            JOIN skills sk ON sk.id = sr.skill_id
+            JOIN staff   st ON st.id = sr.staff_id
+            WHERE sr.block_id = ?
+            ORDER BY sr.date, sk.name, st.name
+        """, (block_id,)).fetchall()
+
+        current: dict = {}
+        for r in req_rows:
+            current.setdefault(r["date"], {}).setdefault(r["skill_name"], []).append(r["staff_name"])
+
+        # Compare against last published snapshot (if any)
+        last_pub = conn.execute(
+            "SELECT snapshot_json FROM block_last_published WHERE block_id=?", (block_id,)
+        ).fetchone()
+
+        changes_json = None
+        is_republish = last_pub is not None
+
+        if is_republish:
+            old: dict = json.loads(last_pub["snapshot_json"])
+
+            def to_tuples(snap):
+                return {
+                    (date, skill, name)
+                    for date, skills in snap.items()
+                    for skill, names in skills.items()
+                    for name in names
+                }
+
+            old_set = to_tuples(old)
+            new_set = to_tuples(current)
+            changes = (
+                [{"type": "added",   "date": d, "skill": sk, "staff": st} for d, sk, st in sorted(new_set - old_set)]
+              + [{"type": "removed", "date": d, "skill": sk, "staff": st} for d, sk, st in sorted(old_set - new_set)]
+            )
+            changes.sort(key=lambda c: (c["date"], c["skill"], c["type"]))
+            changes_json = json.dumps(changes)
+
+        # Next version number
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) AS v FROM block_publish_history WHERE block_id=?",
+            (block_id,)
+        ).fetchone()
+        version = row["v"] + 1
 
         conn.execute(
-            "UPDATE schedule_blocks SET status='published' WHERE id=?", (block_id,)
+            "INSERT INTO block_publish_history (block_id, version, changes_json) VALUES (?, ?, ?)",
+            (block_id, version, changes_json)
         )
+        conn.execute("""
+            INSERT INTO block_last_published (block_id, snapshot_json)
+            VALUES (?, ?)
+            ON CONFLICT(block_id) DO UPDATE SET
+                snapshot_json = excluded.snapshot_json,
+                published_at  = datetime('now')
+        """, (block_id, json.dumps(current)))
+        conn.execute("UPDATE schedule_blocks SET status='published' WHERE id=?", (block_id,))
         conn.commit()
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "version": version, "is_republish": is_republish})
+
+
+@bp.route('/blocks/<int:block_id>/publish-history')
+def get_publish_history(block_id):
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT id, version, published_at, changes_json
+            FROM block_publish_history
+            WHERE block_id = ?
+            ORDER BY version DESC
+        """, (block_id,)).fetchall()
+    return jsonify([{
+        "id":           r["id"],
+        "version":      r["version"],
+        "published_at": r["published_at"],
+        "changes":      json.loads(r["changes_json"]) if r["changes_json"] else None,
+    } for r in rows])
 
 
 @bp.route("/blocks/<int:block_id>/optimized/events")

@@ -8,17 +8,20 @@ Hard constraints:
   - Staff must have the skill
   - One skill per staff per day
   - TL assigned → cannot fill any other skill that day
-  - FTE: exact shifts per pay period (floor AND ceiling)
+  - FTE: ceiling per pay period (scaled for partial periods)
+  - FTE: floor per pay period for single-skill staff
   - FTE: weekly ceiling (1.0→4/wk, 0.75→3/wk, 0.6→3/wk max)
   - Rotation skills (IRC, ECU): at most once per week per staff
   - Call: excluded from optimizer entirely
 
 Soft constraints (minimize):
-  TIER 1: understaffing — penalty weighted by day priority × skill priority
-          Lower priority number = more important = higher penalty
-          Formula: (MAX_PRIO - day_prio) × (MAX_PRIO - skill_prio) × W_STAFFING
-  TIER 2 (weight 10): moves away from staff requests
-  TIER 3 (weight 1):  IRC/ECU rotation recency penalty
+  TIER 1:  understaffing — penalty weighted by day priority × skill priority
+           Lower priority number = more important = higher penalty
+           Formula: (MAX_PRIO - day_prio) × (MAX_PRIO - skill_prio) × W_STAFFING
+  TIER 1b: under-FTE — encourage hitting pay-period targets
+  TIER 1c: rotation fairness — spread IRC/ECU evenly among multi-skilled staff
+  TIER 2  (weight 10): moves away from staff requests
+  TIER 3  (weight  1): IRC/ECU rotation recency penalty
 """
 
 import sqlite3
@@ -30,10 +33,11 @@ ROTATION_SKILLS = {"IRC", "ECU"}
 WEEKEND_SKILL   = "Call"
 TL_SKILL        = "TL"
 
-W_STAFFING = 1000
-W_MOVE     = 10
-W_ROTATION = 1
-MAX_PRIO   = 6   # priorities run 1–5, so max+1 = 6 gives meaningful weights
+W_STAFFING  = 1000
+W_FTE_UNDER = 500
+W_MOVE      = 10
+W_ROTATION  = 1
+MAX_PRIO    = 6   # priorities run 1–5; (MAX_PRIO - prio) gives the weight multiplier
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +85,6 @@ def _load(conn, block_id):
     day_rows = conn.execute("SELECT day_of_week, priority FROM day_priority").fetchall()
     day_priority = {r["day_of_week"]: r["priority"] for r in day_rows}
 
-    # All current assignments on the grid (requests)
     req_rows = conn.execute(
         "SELECT staff_id, date, skill_id FROM staff_requests WHERE block_id = ?",
         (block_id,)
@@ -143,11 +146,14 @@ def _pay_periods(block):
     return periods
 
 
+# ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
+
 def _lookup_fte(fte_tiers, fte):
     """
     Return (shifts_per_week, shifts_per_pp) for the given FTE value.
-    Tries exact match first, then falls back to the nearest tier at or
-    below the requested FTE, then the lowest tier available.
+    Tries exact match first, then nearest tier at or below, then lowest tier.
     """
     sorted_tiers = sorted(fte_tiers, key=lambda t: t[0], reverse=True)
     for tier_fte, weekly, pp in sorted_tiers:
@@ -165,9 +171,8 @@ def _rotation_penalty(staff_id, skill_id, rotation_history, weekday_dates):
     key = (staff_id, skill_id)
     if key not in rotation_history:
         return 0
-    last     = rotation_history[key]
     days_ago = (dt_date.fromisoformat(weekday_dates[-1]) -
-                dt_date.fromisoformat(last)).days
+                dt_date.fromisoformat(rotation_history[key])).days
     return max(0, 100 - days_ago)
 
 
@@ -183,485 +188,545 @@ def _staffing_weight(day_name, skill_id, day_priority, skill_prio):
     return (MAX_PRIO - dp) * (MAX_PRIO - sp) * W_STAFFING
 
 
+def _period_targets(target, p_start, p_end, weekday_dates, unavail_dates):
+    """
+    Compute FTE shift counts for one pay period.
+
+    Returns (avail_dates, scaled_target, required) where:
+      avail_dates   - weekday dates in period when staff is available
+      scaled_target - prorated shift count (handles partial periods at block edges)
+      required      - hard floor = max(0, scaled_target - unavail_count)
+    """
+    all_period_dates = [
+        d for d in weekday_dates
+        if p_start.isoformat() <= d <= p_end.isoformat()
+    ]
+    if not all_period_dates:
+        return [], 0, 0
+
+    # A pay period is always 14 calendar days
+    full_weekdays = sum(
+        1 for i in range(14)
+        if (p_start + timedelta(days=i)).weekday() < 5
+    )
+    actual = len(all_period_dates)
+    scaled_target = round(target * actual / full_weekdays) if actual < full_weekdays else target
+
+    unavail_count = sum(1 for d in all_period_dates if d in unavail_dates)
+    required      = max(0, scaled_target - unavail_count)
+    avail_dates   = [d for d in all_period_dates if d not in unavail_dates]
+    return avail_dates, scaled_target, required
+
+
+def _period_vars(x, staff_id, avail_dates, optimizer_skill_ids):
+    """All decision variables for a staff member over their available dates in a period."""
+    return [
+        x[(staff_id, d, skid)]
+        for d in avail_dates
+        for skid in optimizer_skill_ids
+        if (staff_id, d, skid) in x
+    ]
+
+
+def _has_optimizer_skills(staff_member, optimizer_skill_ids):
+    return any(skid in staff_member["skill_ids"] for skid in optimizer_skill_ids)
+
+
+def _is_single_skill(staff_member, optimizer_skill_ids):
+    return sum(1 for s in staff_member["skill_ids"] if s in optimizer_skill_ids) == 1
+
+
 # ---------------------------------------------------------------------------
-# Solver
+# Variable builder
 # ---------------------------------------------------------------------------
 
-def optimize(conn, block_id, time_limit_seconds=60):
-    (block, staff, skills, template_needs, skill_minimums,
-     day_priority, requests, unavailability, closed,
-     rotation_history, fte_tiers) = _load(conn, block_id)
-
-    def fte_pp_target(fte):
-        return _lookup_fte(fte_tiers, fte)[1]
-
-    def fte_weekly_max(fte):
-        return _lookup_fte(fte_tiers, fte)[0]
-
-    all_dates, weekday_dates = _build_dates(block)
-    pay_periods = _pay_periods(block)
-
-    staff_ids = list(staff.keys())
-    skill_ids = list(skills.keys())
-
-    skill_name = {sid: skills[sid]["name"] for sid in skill_ids}
-    skill_prio = {sid: skills[sid]["priority"] for sid in skill_ids}
-
-    tl_skill_id        = next((s for s in skill_ids if skill_name[s] == TL_SKILL), None)
-    rotation_skill_ids = [s for s in skill_ids if skill_name[s] in ROTATION_SKILLS]
-
-    # Skills the optimizer assigns (no Call)
-    optimizer_skill_ids = [s for s in skill_ids if skill_name[s] != WEEKEND_SKILL]
-
-    model = cp_model.CpModel()
-
-    # ── Decision variables ───────────────────────────────────────────────────
+def _build_variables(model, staff, staff_ids, optimizer_skill_ids,
+                     weekday_dates, closed, unavailability):
+    """
+    Return a sparse dict x: (staff_id, date, skill_id) -> BoolVar.
+    Only valid triples are included — invalid combinations (unavailable,
+    wrong skill, closed day) simply have no entry.
+    """
     x = {}
-    for sid in staff_ids:
-        x[sid] = {}
-        for date in all_dates:
-            x[sid][date] = {}
-            is_weekend = dt_date.fromisoformat(date).weekday() >= 5
+    for staff_id in staff_ids:
+        unavail  = unavailability.get(staff_id, set())
+        skill_set = staff[staff_id]["skill_ids"]
+        for date in weekday_dates:
+            if date in closed or date in unavail:
+                continue
             for skid in optimizer_skill_ids:
-                if is_weekend:
-                    x[sid][date][skid] = model.NewConstant(0)
-                elif date in closed:
-                    x[sid][date][skid] = model.NewConstant(0)
-                elif date in unavailability.get(sid, set()):
-                    x[sid][date][skid] = model.NewConstant(0)
-                elif skid not in staff[sid]["skill_ids"]:
-                    x[sid][date][skid] = model.NewConstant(0)
-                else:
-                    x[sid][date][skid] = model.NewBoolVar(f"x_{sid}_{date}_{skid}")
+                if skid in skill_set:
+                    x[(staff_id, date, skid)] = model.NewBoolVar(
+                        f"x_{staff_id}_{date}_{skid}"
+                    )
+    return x
 
-    # ── Hard constraints ─────────────────────────────────────────────────────
 
-    # 1. One skill per staff per day
-    for sid in staff_ids:
-        for date in all_dates:
-            model.AddAtMostOne(
-                x[sid][date][skid] for skid in optimizer_skill_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            )
+# ---------------------------------------------------------------------------
+# Hard constraints
+# ---------------------------------------------------------------------------
 
-    # 2. TL exclusivity
-    if tl_skill_id:
-        for sid in staff_ids:
-            if tl_skill_id not in staff[sid]["skill_ids"]:
-                continue
-            for date in weekday_dates:
-                tl_var = x[sid][date][tl_skill_id]
-                if not isinstance(tl_var, cp_model.IntVar):
-                    continue
-                for skid in optimizer_skill_ids:
-                    if skid == tl_skill_id:
-                        continue
-                    other_var = x[sid][date][skid]
-                    if isinstance(other_var, cp_model.IntVar):
-                        model.Add(other_var == 0).OnlyEnforceIf(tl_var)
-
-    # 3. FTE — exact floor and ceiling per pay period
-    for sid in staff_ids:
-        # Skip staff with no optimizer skills — they can't be scheduled
-        if not any(skid in staff[sid]["skill_ids"] for skid in optimizer_skill_ids):
-            continue
-
-        target        = fte_pp_target(staff[sid]["fte"])
-        unavail_dates = unavailability.get(sid, set())
-
-        for p_start, p_end in pay_periods:
-            period_weekday_dates = [
-                d for d in weekday_dates
-                if p_start.isoformat() <= d <= p_end.isoformat()
+def _add_one_skill_per_day(model, x, staff_ids, weekday_dates, optimizer_skill_ids):
+    """Each staff member works at most one skill per day."""
+    for staff_id in staff_ids:
+        for date in weekday_dates:
+            day_vars = [
+                x[(staff_id, date, skid)]
+                for skid in optimizer_skill_ids
+                if (staff_id, date, skid) in x
             ]
-            if not period_weekday_dates:
+            if len(day_vars) > 1:
+                model.AddAtMostOne(day_vars)
+
+
+def _add_tl_exclusivity(model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+                        tl_skill_id, staff):
+    """If assigned as TL, staff cannot fill any other skill that day."""
+    if not tl_skill_id:
+        return
+    for staff_id in staff_ids:
+        if tl_skill_id not in staff[staff_id]["skill_ids"]:
+            continue
+        for date in weekday_dates:
+            tl_key = (staff_id, date, tl_skill_id)
+            if tl_key not in x:
                 continue
-
-            # Scale for partial periods at block edges
-            full_weekdays = 0
-            d = p_start
-            while d <= p_end:
-                if d.weekday() < 5:
-                    full_weekdays += 1
-                d += timedelta(days=1)
-
-            actual_weekdays = len(period_weekday_dates)
-            if actual_weekdays < full_weekdays:
-                scaled_target = round(target * actual_weekdays / full_weekdays)
-            else:
-                scaled_target = target
-
-            unavail_count = sum(1 for d in period_weekday_dates if d in unavail_dates)
-            required      = max(0, scaled_target - unavail_count)
-
-            period_vars = []
-            for date in period_weekday_dates:
-                if date in unavail_dates:
+            tl_var = x[tl_key]
+            for skid in optimizer_skill_ids:
+                if skid == tl_skill_id:
                     continue
-                for skid in optimizer_skill_ids:
-                    v = x[sid][date][skid]
-                    if isinstance(v, cp_model.IntVar):
-                        period_vars.append(v)
+                other_key = (staff_id, date, skid)
+                if other_key in x:
+                    model.Add(x[other_key] == 0).OnlyEnforceIf(tl_var)
 
-            if period_vars:
-                model.Add(sum(period_vars) <= scaled_target)
 
-    # 4. Weekly FTE ceiling + rotation once-per-week (combined loop)
-    blk_start = dt_date.fromisoformat(block["start_date"])
-    blk_end   = dt_date.fromisoformat(block["end_date"])
+def _add_fte_ceiling(model, x, staff_ids, weekday_dates, pay_periods,
+                     optimizer_skill_ids, staff, fte_tiers, unavailability):
+    """Total shifts per pay period must not exceed the (scaled) FTE target."""
+    for staff_id in staff_ids:
+        if not _has_optimizer_skills(staff[staff_id], optimizer_skill_ids):
+            continue
+        target = _lookup_fte(fte_tiers, staff[staff_id]["fte"])[1]
+        unavail = unavailability.get(staff_id, set())
+        for p_start, p_end in pay_periods:
+            avail_dates, scaled_target, _ = _period_targets(
+                target, p_start, p_end, weekday_dates, unavail
+            )
+            pvars = _period_vars(x, staff_id, avail_dates, optimizer_skill_ids)
+            if pvars:
+                model.Add(sum(pvars) <= scaled_target)
+
+
+def _add_fte_floor_single_skill(model, x, staff_ids, weekday_dates, pay_periods,
+                                optimizer_skill_ids, staff, fte_tiers, unavailability):
+    """
+    For single-skill staff, enforce the hard FTE floor per pay period.
+    Multi-skilled staff get a soft floor via the objective instead.
+    """
+    for staff_id in staff_ids:
+        if not _is_single_skill(staff[staff_id], optimizer_skill_ids):
+            continue
+        target = _lookup_fte(fte_tiers, staff[staff_id]["fte"])[1]
+        unavail = unavailability.get(staff_id, set())
+        for p_start, p_end in pay_periods:
+            avail_dates, _, required = _period_targets(
+                target, p_start, p_end, weekday_dates, unavail
+            )
+            pvars = _period_vars(x, staff_id, avail_dates, optimizer_skill_ids)
+            if pvars and required > 0:
+                model.Add(sum(pvars) >= required)
+
+
+def _add_weekly_fte_ceiling(model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+                            staff, fte_tiers, unavailability, blk_start, blk_end):
+    """Weekly shift count must not exceed the FTE tier's weekly cap."""
     wk = blk_start - timedelta(days=blk_start.weekday())
     while wk <= blk_end:
         wk_end = wk + timedelta(days=6)
-
-        for sid in staff_ids:
-            # Skip staff with no optimizer skills
-            if not any(skid in staff[sid]["skill_ids"] for skid in optimizer_skill_ids):
+        for staff_id in staff_ids:
+            if not _has_optimizer_skills(staff[staff_id], optimizer_skill_ids):
                 continue
-            fte = staff[sid]["fte"]
-            unavail_dates = unavailability.get(sid, set())
-            week_weekday_dates = [
-                d for d in weekday_dates
-                if wk.isoformat() <= d <= wk_end.isoformat()
-            ]
-            if not week_weekday_dates:
-                continue
-
+            unavail = unavailability.get(staff_id, set())
             week_vars = [
-                x[sid][date][skid]
-                for date in week_weekday_dates
-                if date not in unavail_dates
+                x[(staff_id, d, skid)]
+                for d in weekday_dates
+                if wk.isoformat() <= d <= wk_end.isoformat() and d not in unavail
                 for skid in optimizer_skill_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
+                if (staff_id, d, skid) in x
             ]
             if week_vars:
-                model.Add(sum(week_vars) <= fte_weekly_max(fte))
+                weekly_max = _lookup_fte(fte_tiers, staff[staff_id]["fte"])[0]
+                model.Add(sum(week_vars) <= weekly_max)
+        wk = wk_end + timedelta(days=1)
 
-        # Rotation: at most once per week per staff
-        # Exception: staff whose only skill IS the rotation skill
-        # (e.g. Julia/Kathy who can only do ECU) — they are not rotating,
-        # ECU is just their job. No weekly limit for them.
+
+def _add_rotation_once_per_week(model, x, staff_ids, weekday_dates,
+                                rotation_skill_ids, optimizer_skill_ids,
+                                staff, blk_start, blk_end):
+    """
+    Multi-skilled staff may hold a rotation skill (IRC/ECU) at most once per week.
+    Single-skill staff are exempt — the rotation skill is simply their job.
+    """
+    wk = blk_start - timedelta(days=blk_start.weekday())
+    while wk <= blk_end:
+        wk_end = wk + timedelta(days=6)
         for skid in rotation_skill_ids:
-            for sid in staff_ids:
-                if skid not in staff[sid]["skill_ids"]:
+            for staff_id in staff_ids:
+                if skid not in staff[staff_id]["skill_ids"]:
                     continue
-                opt_skills = [s for s in staff[sid]["skill_ids"]
-                              if s in optimizer_skill_ids]
-                if len(opt_skills) == 1:
-                    continue  # single-skill staff — no rotation limit
+                if _is_single_skill(staff[staff_id], optimizer_skill_ids):
+                    continue  # ECU/IRC is just their job — no weekly limit
                 rot_vars = [
-                    x[sid][date][skid]
-                    for date in weekday_dates
-                    if wk.isoformat() <= date <= wk_end.isoformat()
-                    and isinstance(x[sid][date][skid], cp_model.IntVar)
+                    x[(staff_id, d, skid)]
+                    for d in weekday_dates
+                    if wk.isoformat() <= d <= wk_end.isoformat()
+                    and (staff_id, d, skid) in x
                 ]
                 if rot_vars:
                     model.AddAtMostOne(rot_vars)
-
         wk = wk_end + timedelta(days=1)
 
-    # 5. Hard minimum staffing per day per skill
+
+def _add_staffing_minimums(model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+                           template_needs, skill_minimums, closed):
+    """Hard minimum staffing per day per skill."""
     for date in weekday_dates:
         if date in closed:
             continue
         day_name = dt_date.fromisoformat(date).strftime("%A")
-        day_needs = template_needs.get(day_name, {})
-        for skid, qty in day_needs.items():
+        for skid in template_needs.get(day_name, {}):
             if skid not in optimizer_skill_ids:
                 continue
             minimum = skill_minimums.get(skid, 0)
             if minimum == 0:
                 continue
-            assigned = [
-                x[sid][date][skid] for sid in staff_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            ]
+            assigned = [x[(sid, date, skid)] for sid in staff_ids if (sid, date, skid) in x]
             if assigned:
                 model.Add(sum(assigned) >= minimum)
 
-    # 5b. Hard FTE floor for single-skill staff
-    # If a staff member only has one optimizer skill, they must hit their
-    # FTE target — otherwise they can never reach it.
-    for sid in staff_ids:
-        skill_options = [s for s in staff[sid]["skill_ids"] if s in optimizer_skill_ids]
-        if len(skill_options) == 0:
-            continue  # no skills — skip entirely
-        if len(skill_options) > 1:
-            continue  # multi-skilled — soft FTE is fine
 
-        target        = fte_pp_target(staff[sid]["fte"])
-        unavail_dates = unavailability.get(sid, set())
-
-        for p_start, p_end in pay_periods:
-            period_weekday_dates = [
-                d for d in weekday_dates
-                if p_start.isoformat() <= d <= p_end.isoformat()
-            ]
-            if not period_weekday_dates:
-                continue
-
-            full_weekdays = 0
-            d = p_start
-            while d <= p_end:
-                if d.weekday() < 5:
-                    full_weekdays += 1
-                d += timedelta(days=1)
-
-            actual_weekdays = len(period_weekday_dates)
-            if actual_weekdays < full_weekdays:
-                scaled_target = round(target * actual_weekdays / full_weekdays)
-            else:
-                scaled_target = target
-
-            unavail_count = sum(1 for d in period_weekday_dates if d in unavail_dates)
-            required      = max(0, scaled_target - unavail_count)
-
-            period_vars = [
-                x[sid][date][skid]
-                for date in period_weekday_dates
-                if date not in unavail_dates
-                for skid in optimizer_skill_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            ]
-            if period_vars and required > 0:
-                model.Add(sum(period_vars) >= required)
-
-    # 5c. Hard daily maximums for specific skills
-    DAILY_MAX = {
-        skill_id: qty
-        for skill_id, qty in [
-            (next((s for s in skill_ids if skill_name[s] == "TL"), None), 1),
-            (next((s for s in skill_ids if skill_name[s] == "IRC"), None), 1),
-            (next((s for s in skill_ids if skill_name[s] == "ECU"), None), 2),
-        ]
-        if skill_id is not None
+def _add_daily_maximums(model, x, staff_ids, weekday_dates, skill_ids,
+                        skill_name, closed):
+    """Hard daily caps for specific skills: TL=1, IRC=1, ECU=2."""
+    skill_by_name = {skill_name[sid]: sid for sid in skill_ids}
+    daily_max = {
+        skill_by_name[name]: cap
+        for name, cap in [("TL", 1), ("IRC", 1), ("ECU", 2)]
+        if name in skill_by_name
     }
-
     for date in weekday_dates:
         if date in closed:
             continue
-        for skid, max_count in DAILY_MAX.items():
-            assigned = [
-                x[sid][date][skid] for sid in staff_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            ]
+        for skid, cap in daily_max.items():
+            assigned = [x[(sid, date, skid)] for sid in staff_ids if (sid, date, skid) in x]
             if assigned:
-                model.Add(sum(assigned) <= max_count)
+                model.Add(sum(assigned) <= cap)
 
-    # ── Soft constraints (objective) ─────────────────────────────────────────
+
+def _add_hard_constraints(model, x, staff_ids, weekday_dates, pay_periods,
+                          optimizer_skill_ids, rotation_skill_ids, tl_skill_id,
+                          skill_ids, skill_name, staff, fte_tiers, unavailability,
+                          template_needs, skill_minimums, closed, blk_start, blk_end):
+    _add_one_skill_per_day(
+        model, x, staff_ids, weekday_dates, optimizer_skill_ids)
+    _add_tl_exclusivity(
+        model, x, staff_ids, weekday_dates, optimizer_skill_ids, tl_skill_id, staff)
+    _add_fte_ceiling(
+        model, x, staff_ids, weekday_dates, pay_periods,
+        optimizer_skill_ids, staff, fte_tiers, unavailability)
+    _add_fte_floor_single_skill(
+        model, x, staff_ids, weekday_dates, pay_periods,
+        optimizer_skill_ids, staff, fte_tiers, unavailability)
+    _add_weekly_fte_ceiling(
+        model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+        staff, fte_tiers, unavailability, blk_start, blk_end)
+    _add_rotation_once_per_week(
+        model, x, staff_ids, weekday_dates, rotation_skill_ids,
+        optimizer_skill_ids, staff, blk_start, blk_end)
+    _add_staffing_minimums(
+        model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+        template_needs, skill_minimums, closed)
+    _add_daily_maximums(
+        model, x, staff_ids, weekday_dates, skill_ids, skill_name, closed)
+
+
+# ---------------------------------------------------------------------------
+# Objective (soft constraints by tier)
+# ---------------------------------------------------------------------------
+
+def _tier1_understaffing(model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+                         template_needs, day_priority, skill_prio, closed):
+    """Penalize each unfilled slot, weighted by day and skill priority."""
     penalties = []
-
-    # TIER 1: Understaffing — weighted by day × skill priority
     for date in weekday_dates:
         if date in closed:
             continue
         day_name = dt_date.fromisoformat(date).strftime("%A")
-        day_needs = template_needs.get(day_name, {})
-
-        for skid, qty in day_needs.items():
+        for skid, qty in template_needs.get(day_name, {}).items():
             if skid not in optimizer_skill_ids:
                 continue
             weight = _staffing_weight(day_name, skid, day_priority, skill_prio)
             if weight == 0:
                 continue
-
-            assigned = [
-                x[sid][date][skid] for sid in staff_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            ]
+            assigned = [x[(sid, date, skid)] for sid in staff_ids if (sid, date, skid) in x]
             if not assigned:
                 continue
-
-            # Penalize each unfilled slot up to the target quantity
             shortage = model.NewIntVar(0, qty, f"short_{date}_{skid}")
             model.Add(shortage >= qty - sum(assigned))
-            model.Add(shortage >= 0)
             penalties.append(weight * shortage)
+    return penalties
 
-    # TIER 1b: Under-FTE penalty — encourage hitting the target
-    # Weight is high enough to prefer full FTE but lower than staffing needs
-    W_FTE_UNDER = 500
-    for sid in staff_ids:
-        target        = fte_pp_target(staff[sid]["fte"])
-        unavail_dates = unavailability.get(sid, set())
 
+def _tier1b_fte_under(model, x, staff_ids, weekday_dates, pay_periods,
+                      optimizer_skill_ids, staff, fte_tiers, unavailability):
+    """Penalize falling short of the FTE pay-period target."""
+    penalties = []
+    for staff_id in staff_ids:
+        target  = _lookup_fte(fte_tiers, staff[staff_id]["fte"])[1]
+        unavail = unavailability.get(staff_id, set())
         for p_start, p_end in pay_periods:
-            period_weekday_dates = [
-                d for d in weekday_dates
-                if p_start.isoformat() <= d <= p_end.isoformat()
-            ]
-            if not period_weekday_dates:
-                continue
-
-            full_weekdays = 0
-            d = p_start
-            while d <= p_end:
-                if d.weekday() < 5:
-                    full_weekdays += 1
-                d += timedelta(days=1)
-
-            actual_weekdays = len(period_weekday_dates)
-            if actual_weekdays < full_weekdays:
-                scaled_target = round(target * actual_weekdays / full_weekdays)
-            else:
-                scaled_target = target
-
-            unavail_count = sum(1 for d in period_weekday_dates if d in unavail_dates)
-            required      = max(0, scaled_target - unavail_count)
-
-            period_vars = [
-                x[sid][date][skid]
-                for date in period_weekday_dates
-                if date not in unavail_dates
-                for skid in optimizer_skill_ids
-                if isinstance(x[sid][date][skid], cp_model.IntVar)
-            ]
-            if period_vars and required > 0:
-                under = model.NewIntVar(0, required, f"fte_under_{sid}_{p_start}")
-                model.Add(under >= required - sum(period_vars))
-                model.Add(under >= 0)
+            avail_dates, _, required = _period_targets(
+                target, p_start, p_end, weekday_dates, unavail
+            )
+            pvars = _period_vars(x, staff_id, avail_dates, optimizer_skill_ids)
+            if pvars and required > 0:
+                under = model.NewIntVar(0, required, f"fte_under_{staff_id}_{p_start}")
+                model.Add(under >= required - sum(pvars))
                 penalties.append(W_FTE_UNDER * under)
+    return penalties
 
-    # TIER 1c: Rotation fairness across pay periods
-    # For rotation skills (ECU, IRC), spread assignments evenly among eligible
-    # multi-skilled staff. Single-skill staff (Julia, Kathy) are excluded
-    # since ECU is their only job — they should always get it.
+
+def _tier1c_rotation_fairness(model, x, staff_ids, weekday_dates, pay_periods,
+                              rotation_skill_ids, optimizer_skill_ids, staff):
+    """
+    Penalize uneven spread of rotation skills among eligible multi-skilled staff.
+    Single-skill staff (whose only skill is a rotation skill) are excluded.
+    """
+    penalties = []
     for skid in rotation_skill_ids:
-        eligible_multi = [
+        eligible = [
             sid for sid in staff_ids
             if skid in staff[sid]["skill_ids"]
-            and len([s for s in staff[sid]["skill_ids"] if s in optimizer_skill_ids]) > 1
+            and not _is_single_skill(staff[sid], optimizer_skill_ids)
         ]
-        if len(eligible_multi) < 2:
+        if len(eligible) < 2:
             continue
-
-        # For each pay period, penalize imbalance among multi-skilled staff
+        max_possible = len(pay_periods) * 3  # conservative upper bound
         for p_start, p_end in pay_periods:
-            period_vars_by_staff = {}
-            for sid in eligible_multi:
+            sums = {}
+            for sid in eligible:
                 pvars = [
-                    x[sid][date][skid]
-                    for date in weekday_dates
-                    if p_start.isoformat() <= date <= p_end.isoformat()
-                    and isinstance(x[sid][date][skid], cp_model.IntVar)
+                    x[(sid, d, skid)]
+                    for d in weekday_dates
+                    if p_start.isoformat() <= d <= p_end.isoformat()
+                    and (sid, d, skid) in x
                 ]
                 if pvars:
-                    period_vars_by_staff[sid] = pvars
-
-            if len(period_vars_by_staff) < 2:
+                    s = model.NewIntVar(0, max_possible, f"rot_sum_{skid}_{sid}_{p_start}")
+                    model.Add(s == sum(pvars))
+                    sums[sid] = s
+            if len(sums) < 2:
                 continue
-
-            # Create sum variable for each staff member
-            sums = {}
-            max_possible = len(pay_periods) * 3  # upper bound
-            for sid, pvars in period_vars_by_staff.items():
-                s = model.NewIntVar(0, max_possible, f"rot_sum_{skid}_{sid}_{p_start}")
-                model.Add(s == sum(pvars))
-                sums[sid] = s
-
-            # Penalize max - min spread
             sum_list = list(sums.values())
-            max_sum  = model.NewIntVar(0, max_possible, f"rot_max_{skid}_{p_start}")
-            min_sum  = model.NewIntVar(0, max_possible, f"rot_min_{skid}_{p_start}")
-            model.AddMaxEquality(max_sum, sum_list)
-            model.AddMinEquality(min_sum, sum_list)
+            max_s  = model.NewIntVar(0, max_possible, f"rot_max_{skid}_{p_start}")
+            min_s  = model.NewIntVar(0, max_possible, f"rot_min_{skid}_{p_start}")
             spread = model.NewIntVar(0, max_possible, f"rot_spread_{skid}_{p_start}")
-            model.Add(spread == max_sum - min_sum)
+            model.AddMaxEquality(max_s, sum_list)
+            model.AddMinEquality(min_s, sum_list)
+            model.Add(spread == max_s - min_s)
             penalties.append(W_STAFFING * spread)
+    return penalties
 
-    # TIER 2: Moves away from staff requests
-    for (sid, date, skid) in requests:
-        if sid not in staff or skid not in skills:
+
+def _tier2_request_moves(model, x, requests, staff, skills, optimizer_skill_ids):
+    """Penalize assignments that differ from staff requests."""
+    penalties = []
+    for staff_id, date, skid in requests:
+        if staff_id not in staff or skid not in skills:
             continue
         if skid not in optimizer_skill_ids:
             continue
-        v = x.get(sid, {}).get(date, {}).get(skid)
-        if v is None or not isinstance(v, cp_model.IntVar):
+        key = (staff_id, date, skid)
+        if key not in x:
             continue
-        not_honored = model.NewBoolVar(f"move_{sid}_{date}_{skid}")
-        model.Add(not_honored == 1 - v)
+        not_honored = model.NewBoolVar(f"move_{staff_id}_{date}_{skid}")
+        model.Add(not_honored == 1 - x[key])
         penalties.append(W_MOVE * not_honored)
+    return penalties
 
-    # TIER 3: Rotation recency penalty
+
+def _tier3_rotation_recency(x, staff_ids, weekday_dates, rotation_skill_ids,
+                            staff, rotation_history):
+    """Penalize assigning a rotation skill to someone who did it recently."""
+    penalties = []
     for skid in rotation_skill_ids:
-        for sid in staff_ids:
-            if skid not in staff[sid]["skill_ids"]:
+        for staff_id in staff_ids:
+            if skid not in staff[staff_id]["skill_ids"]:
                 continue
-            pen = _rotation_penalty(sid, skid, rotation_history, weekday_dates)
+            pen = _rotation_penalty(staff_id, skid, rotation_history, weekday_dates)
             if pen == 0:
                 continue
             for date in weekday_dates:
-                v = x[sid][date].get(skid)
-                if isinstance(v, cp_model.IntVar):
-                    penalties.append(W_ROTATION * pen * v)
+                key = (staff_id, date, skid)
+                if key in x:
+                    penalties.append(W_ROTATION * pen * x[key])
+    return penalties
 
-    model.Minimize(sum(penalties) if penalties else model.NewConstant(0))
 
-    # ── Solve ────────────────────────────────────────────────────────────────
+def _build_objective(model, x, staff_ids, weekday_dates, pay_periods,
+                     optimizer_skill_ids, rotation_skill_ids, staff, fte_tiers,
+                     unavailability, template_needs, day_priority, skill_prio,
+                     requests, skills, rotation_history, closed):
+    penalties = (
+        _tier1_understaffing(
+            model, x, staff_ids, weekday_dates, optimizer_skill_ids,
+            template_needs, day_priority, skill_prio, closed)
+        + _tier1b_fte_under(
+            model, x, staff_ids, weekday_dates, pay_periods,
+            optimizer_skill_ids, staff, fte_tiers, unavailability)
+        + _tier1c_rotation_fairness(
+            model, x, staff_ids, weekday_dates, pay_periods,
+            rotation_skill_ids, optimizer_skill_ids, staff)
+        + _tier2_request_moves(
+            model, x, requests, staff, skills, optimizer_skill_ids)
+        + _tier3_rotation_recency(
+            x, staff_ids, weekday_dates, rotation_skill_ids,
+            staff, rotation_history)
+    )
+    if penalties:
+        model.Minimize(sum(penalties))
+
+
+# ---------------------------------------------------------------------------
+# Result extraction & diagnostics
+# ---------------------------------------------------------------------------
+
+def _extract_result(solver, x, staff, staff_ids, all_dates, optimizer_skill_ids,
+                    skill_name, template_needs):
+    result = {}
+    unmet  = {}
+    for date in all_dates:
+        result[date] = {}
+        day_name  = dt_date.fromisoformat(date).strftime("%A")
+        day_needs = template_needs.get(day_name, {})
+
+        for skid in optimizer_skill_ids:
+            assigned_names = [
+                staff[sid]["name"]
+                for sid in staff_ids
+                if (sid, date, skid) in x and solver.Value(x[(sid, date, skid)]) == 1
+            ]
+            if assigned_names:
+                result[date][skill_name[skid]] = assigned_names
+
+        day_unmet = {
+            skill_name[skid]: qty - len(result[date].get(skill_name[skid], []))
+            for skid, qty in day_needs.items()
+            if skid in optimizer_skill_ids
+            and qty - len(result[date].get(skill_name[skid], [])) > 0
+        }
+        if day_unmet:
+            unmet[date] = day_unmet
+
+    result["unmet"] = unmet
+    return result
+
+
+def _diagnose_infeasible(staff, staff_ids, weekday_dates, x,
+                         pay_periods, fte_tiers, optimizer_skill_ids):
+    """
+    Identify staff members whose available slots cannot satisfy their FTE target.
+    Returns a list of diagnostic strings (empty if no obvious conflict found).
+    """
+    lines = []
+    for staff_id in staff_ids:
+        target = _lookup_fte(fte_tiers, staff[staff_id]["fte"])[1]
+        valid_slots = sum(
+            1 for d in weekday_dates
+            if any((staff_id, d, skid) in x for skid in optimizer_skill_ids)
+        )
+        total_needed = target * len(pay_periods)
+        if valid_slots < total_needed:
+            lines.append(
+                f"  {staff[staff_id]['name']} (FTE {staff[staff_id]['fte']}): "
+                f"needs {total_needed} shifts but only {valid_slots} valid slots"
+            )
+
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def optimize(conn, block_id, time_limit_seconds=60):
+    # ── Load ──────────────────────────────────────────────────────────────────
+    (block, staff, skills, template_needs, skill_minimums,
+     day_priority, requests, unavailability, closed,
+     rotation_history, fte_tiers) = _load(conn, block_id)
+
+    all_dates, weekday_dates = _build_dates(block)
+    pay_periods = _pay_periods(block)
+
+    staff_ids  = list(staff.keys())
+    skill_ids  = list(skills.keys())
+    skill_name = {sid: skills[sid]["name"] for sid in skill_ids}
+    skill_prio = {sid: skills[sid]["priority"] for sid in skill_ids}
+
+    tl_skill_id         = next((s for s in skill_ids if skill_name[s] == TL_SKILL), None)
+    rotation_skill_ids  = [s for s in skill_ids if skill_name[s] in ROTATION_SKILLS]
+    optimizer_skill_ids = [s for s in skill_ids if skill_name[s] != WEEKEND_SKILL]
+
+    blk_start = dt_date.fromisoformat(block["start_date"])
+    blk_end   = dt_date.fromisoformat(block["end_date"])
+
+    # ── Build model ───────────────────────────────────────────────────────────
+    model = cp_model.CpModel()
+    x = _build_variables(
+        model, staff, staff_ids, optimizer_skill_ids,
+        weekday_dates, closed, unavailability,
+    )
+
+    # ── Hard constraints ──────────────────────────────────────────────────────
+    _add_hard_constraints(
+        model, x, staff_ids, weekday_dates, pay_periods,
+        optimizer_skill_ids, rotation_skill_ids, tl_skill_id,
+        skill_ids, skill_name, staff, fte_tiers, unavailability,
+        template_needs, skill_minimums, closed, blk_start, blk_end,
+    )
+
+    # ── Objective ─────────────────────────────────────────────────────────────
+    _build_objective(
+        model, x, staff_ids, weekday_dates, pay_periods,
+        optimizer_skill_ids, rotation_skill_ids, staff, fte_tiers,
+        unavailability, template_needs, day_priority, skill_prio,
+        requests, skills, rotation_history, closed,
+    )
+
+    # ── Solve ─────────────────────────────────────────────────────────────────
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_seconds
     solver.parameters.num_search_workers  = 4
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        # Diagnostics
-        diag = []
-        for sid in staff_ids:
-            target = fte_pp_target(staff[sid]["fte"])
-            unavail_dates = unavailability.get(sid, set())
-            valid_slots = sum(
-                1 for d in weekday_dates
-                if d not in unavail_dates
-                and any(
-                    isinstance(x[sid][d][skid], cp_model.IntVar)
-                    for skid in optimizer_skill_ids
-                )
-            )
-            total_needed = target * len(pay_periods)
-            if valid_slots < total_needed:
-                diag.append(
-                    f"  {staff[sid]['name']} (FTE {staff[sid]['fte']}): "
-                    f"needs {total_needed} shifts but only {valid_slots} valid slots"
-                )
+        diag = _diagnose_infeasible(
+            staff, staff_ids, weekday_dates, x,
+            pay_periods, fte_tiers, optimizer_skill_ids,
+        )
         msg = "No feasible solution found."
         if diag:
             msg += " Staff with insufficient slots:\n" + "\n".join(diag)
         else:
-            msg += " The FTE requirements and staffing minimums conflict. "
-            msg += "Check that total staff shifts can cover all required slots."
+            msg += (" The FTE requirements and staffing minimums conflict. "
+                    "Check that total staff shifts can cover all required slots.")
         return None, msg
 
-    # ── Extract result ────────────────────────────────────────────────────────
-    result = {}
-    unmet  = {}
-
-    for date in all_dates:
-        result[date] = {}
-        unmet[date]  = {}
-        day_name = dt_date.fromisoformat(date).strftime("%A")
-        day_needs = template_needs.get(day_name, {})
-
-        for skid in optimizer_skill_ids:
-            sname = skill_name[skid]
-            names = [
-                staff[sid]["name"]
-                for sid in staff_ids
-                if (solver.Value(x[sid][date][skid])
-                    if isinstance(x[sid][date][skid], cp_model.IntVar)
-                    else int(x[sid][date][skid])) == 1
-            ]
-            if names:
-                result[date][sname] = names
-
-        for skid, qty in day_needs.items():
-            if skid not in optimizer_skill_ids:
-                continue
-            sname = skill_name[skid]
-            count = len(result[date].get(sname, []))
-            if count < qty:
-                unmet[date][sname] = qty - count
-
-    result["unmet"] = unmet
-
+    # ── Extract ───────────────────────────────────────────────────────────────
+    result = _extract_result(
+        solver, x, staff, staff_ids, all_dates,
+        optimizer_skill_ids, skill_name, template_needs,
+    )
     _update_rotation_history(conn, result, skills, staff)
     return result, None
 

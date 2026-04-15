@@ -175,6 +175,20 @@ def init_blocks_db():
                 result_json  TEXT,
                 optimized_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS block_publish_history (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_id     INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                version      INTEGER NOT NULL DEFAULT 1,
+                published_at TEXT    NOT NULL DEFAULT (datetime('now')),
+                changes_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS block_last_published (
+                block_id      INTEGER PRIMARY KEY REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                snapshot_json TEXT    NOT NULL,
+                published_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # Seed default FTE tiers (INSERT OR IGNORE so existing rows are kept)
