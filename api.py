@@ -587,8 +587,12 @@ def accept_optimized(block_id):
         skills = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM skills").fetchall()}
         staff  = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM staff").fetchall()}
 
-        # Replace all requests with optimizer output
-        conn.execute("DELETE FROM staff_requests WHERE block_id = ?", (block_id,))
+        # Replace all non-Call requests with optimizer output; Call is managed manually
+        conn.execute("""
+            DELETE FROM staff_requests
+            WHERE block_id = ?
+              AND skill_id NOT IN (SELECT id FROM skills WHERE name = 'Call')
+        """, (block_id,))
 
         added = 0
         for date_str, day in result.items():
