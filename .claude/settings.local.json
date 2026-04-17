@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx react-scripts *)",
+      "Bash(venv/Scripts/pip list *)",
+      "Bash(python -c \"from werkzeug.security import generate_password_hash; print\\(generate_password_hash\\('test'\\)\\)\")",
+      "Bash(venv/Scripts/pip install *)"
+    ]
+  }
+}

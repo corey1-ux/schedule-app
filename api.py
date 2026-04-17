@@ -1,16 +1,193 @@
 import json
+import sqlite3
 from datetime import date as dt_date, timedelta
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
+from werkzeug.security import check_password_hash, generate_password_hash
 from database import get_db
+from auth import api_admin_required, api_login_required, api_scheduler_required
+from limiter import limiter
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 CALL_SKILL_NAME = "Call"
 
 
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@bp.route("/auth/me")
+def auth_me():
+    if "user_id" not in session:
+        return jsonify({"authenticated": False}), 401
+    return jsonify({
+        "authenticated":        True,
+        "username":             session.get("username"),
+        "role":                 session.get("role"),
+        "force_password_change": session.get("force_password_change", False),
+    })
+
+
+@bp.route("/auth/login", methods=["POST"])
+@limiter.limit("5 per minute")
+def auth_login():
+    data     = request.get_json()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
+
+    if not user or not check_password_hash(user["password"], password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    fpc = bool(user["force_password_change"])
+    session["user_id"]               = user["id"]
+    session["username"]              = user["username"]
+    session["role"]                  = user["role"]
+    session["force_password_change"] = fpc
+    return jsonify({
+        "ok":                    True,
+        "username":              user["username"],
+        "role":                  user["role"],
+        "force_password_change": fpc,
+    })
+
+
+@bp.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@bp.route("/auth/change-password", methods=["POST"])
+@api_login_required
+def auth_change_password():
+    data       = request.get_json()
+    current_pw = data.get("current_password") or ""
+    new_pw     = data.get("new_password") or ""
+
+    if len(new_pw) < 8:
+        return jsonify({"error": "New password must be at least 8 characters"}), 400
+
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (session["user_id"],)
+        ).fetchone()
+
+        if not user or not check_password_hash(user["password"], current_pw):
+            return jsonify({"error": "Current password is incorrect"}), 401
+
+        conn.execute(
+            "UPDATE users SET password=?, force_password_change=0 WHERE id=?",
+            (generate_password_hash(new_pw), session["user_id"])
+        )
+        conn.commit()
+
+    session["force_password_change"] = False
+    return jsonify({"ok": True})
+
+
+# ── User management ───────────────────────────────────────────────────────────
+
+@bp.route("/users")
+@api_admin_required
+def get_users():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, username, role, force_password_change FROM users ORDER BY username"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.route("/users", methods=["POST"])
+@api_admin_required
+def create_user():
+    data     = request.get_json()
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    role     = data.get("role", "staff")
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+    if role not in ("admin", "scheduler", "staff"):
+        return jsonify({"error": "Invalid role"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO users (username, password, role, force_password_change) VALUES (?, ?, ?, 1)",
+                (username, generate_password_hash(password), role)
+            )
+            conn.commit()
+        return jsonify({"ok": True})
+    except sqlite3.IntegrityError:
+        return jsonify({"error": f"Username '{username}' already exists"}), 409
+
+
+@bp.route("/users/<int:user_id>", methods=["PUT"])
+@api_admin_required
+def update_user(user_id):
+    data = request.get_json()
+    role = data.get("role")
+    if role not in ("admin", "scheduler", "staff"):
+        return jsonify({"error": "Invalid role"}), 400
+    with get_db() as conn:
+        # Prevent demoting the last admin
+        if role != "admin":
+            target = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+            if target and target["role"] == "admin":
+                admin_count = conn.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin'"
+                ).fetchone()[0]
+                if admin_count <= 1:
+                    return jsonify({"error": "Cannot demote the last admin account"}), 400
+        conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/users/<int:user_id>", methods=["DELETE"])
+@api_admin_required
+def delete_user(user_id):
+    if user_id == session["user_id"]:
+        return jsonify({"error": "Cannot delete your own account"}), 400
+    with get_db() as conn:
+        target = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        if target and target["role"] == "admin":
+            admin_count = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role='admin'"
+            ).fetchone()[0]
+            if admin_count <= 1:
+                return jsonify({"error": "Cannot delete the last admin account"}), 400
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/users/<int:user_id>/reset-password", methods=["POST"])
+@api_admin_required
+def reset_user_password(user_id):
+    data   = request.get_json()
+    new_pw = (data.get("password") or "").strip()
+    if len(new_pw) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET password=?, force_password_change=1 WHERE id=?",
+            (generate_password_hash(new_pw), user_id)
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
 # ── Schedule events (existing calendar) ─────────────────────────────────────
 
 @bp.route("/schedule/events")
+@api_login_required
 def schedule_events():
     with get_db() as conn:
         row = conn.execute("SELECT * FROM generated_schedule WHERE id = 1").fetchone()
@@ -39,6 +216,7 @@ def schedule_events():
 
 
 @bp.route("/schedule/meta")
+@api_login_required
 def schedule_meta():
     with get_db() as conn:
         row = conn.execute(
@@ -52,6 +230,7 @@ def schedule_meta():
 # ── Blocks ───────────────────────────────────────────────────────────────────
 
 @bp.route("/blocks")
+@api_login_required
 def get_blocks():
     with get_db() as conn:
         blocks = conn.execute(
@@ -61,6 +240,7 @@ def get_blocks():
 
 
 @bp.route("/blocks", methods=["POST"])
+@api_scheduler_required
 def create_block():
     from datetime import timedelta
     data       = request.get_json()
@@ -80,6 +260,7 @@ def create_block():
 
 
 @bp.route("/blocks/<int:block_id>")
+@api_login_required
 def get_block(block_id):
     with get_db() as conn:
         block = conn.execute(
@@ -91,6 +272,7 @@ def get_block(block_id):
 
 
 @bp.route("/blocks/<int:block_id>", methods=["DELETE"])
+@api_scheduler_required
 def delete_block(block_id):
     with get_db() as conn:
         conn.execute("DELETE FROM schedule_blocks WHERE id = ?", (block_id,))
@@ -101,6 +283,7 @@ def delete_block(block_id):
 # ── Staff & Skills ───────────────────────────────────────────────────────────
 
 @bp.route("/staff")
+@api_login_required
 def get_staff():
     with get_db() as conn:
         staff_rows = conn.execute("SELECT * FROM staff ORDER BY name").fetchall()
@@ -123,6 +306,7 @@ def get_staff():
 
 
 @bp.route("/staff", methods=["POST"])
+@api_admin_required
 def create_staff():
     data = request.get_json()
     name      = (data.get("name") or "").strip()
@@ -151,6 +335,7 @@ def create_staff():
 
 
 @bp.route("/staff/<int:staff_id>", methods=["PUT"])
+@api_admin_required
 def update_staff(staff_id):
     data      = request.get_json()
     name      = (data.get("name") or "").strip()
@@ -179,6 +364,7 @@ def update_staff(staff_id):
 
 
 @bp.route("/staff/<int:staff_id>", methods=["DELETE"])
+@api_admin_required
 def delete_staff(staff_id):
     with get_db() as conn:
         conn.execute("DELETE FROM staff WHERE id=?", (staff_id,))
@@ -187,15 +373,144 @@ def delete_staff(staff_id):
 
 
 @bp.route("/skills")
+@api_login_required
 def get_skills():
     with get_db() as conn:
         skills = conn.execute("SELECT * FROM skills ORDER BY priority, name").fetchall()
     return jsonify([dict(s) for s in skills])
 
 
+@bp.route("/skills", methods=["POST"])
+@api_admin_required
+def create_skill():
+    data = request.get_json()
+    name = (data.get("name") or "").strip()
+    priority = int(data.get("priority", 0))
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "INSERT INTO skills (name, priority) VALUES (?, ?)", (name, priority)
+            )
+            conn.commit()
+        return jsonify({"ok": True, "id": cur.lastrowid})
+    except Exception:
+        return jsonify({"error": f"Skill '{name}' already exists"}), 409
+
+
+@bp.route("/skills/<int:skill_id>", methods=["PUT"])
+@api_admin_required
+def update_skill(skill_id):
+    data = request.get_json()
+    name = (data.get("name") or "").strip()
+    priority = int(data.get("priority", 0))
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE skills SET name=?, priority=? WHERE id=?", (name, priority, skill_id)
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/skills/<int:skill_id>", methods=["DELETE"])
+@api_admin_required
+def delete_skill(skill_id):
+    with get_db() as conn:
+        conn.execute("DELETE FROM skills WHERE id=?", (skill_id,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+# ── Skill minimums ────────────────────────────────────────────────────────────
+
+@bp.route("/skill-minimums")
+@api_login_required
+def get_skill_minimums():
+    with get_db() as conn:
+        rows = conn.execute("SELECT skill_id, minimum_count FROM skill_minimums").fetchall()
+    return jsonify({r["skill_id"]: r["minimum_count"] for r in rows})
+
+
+@bp.route("/skill-minimums", methods=["PUT"])
+@api_admin_required
+def save_skill_minimums():
+    data = request.get_json()  # { skill_id: minimum_count, ... }
+    with get_db() as conn:
+        for skill_id, minimum in data.items():
+            minimum = max(0, int(minimum))
+            if minimum == 0:
+                conn.execute("DELETE FROM skill_minimums WHERE skill_id=?", (int(skill_id),))
+            else:
+                conn.execute("""
+                    INSERT INTO skill_minimums (skill_id, minimum_count) VALUES (?, ?)
+                    ON CONFLICT(skill_id) DO UPDATE SET minimum_count=excluded.minimum_count
+                """, (int(skill_id), minimum))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+# ── Day priorities ────────────────────────────────────────────────────────────
+
+@bp.route("/day-priorities")
+@api_login_required
+def get_day_priorities():
+    with get_db() as conn:
+        rows = conn.execute("SELECT day_of_week, priority FROM day_priority").fetchall()
+    return jsonify({r["day_of_week"]: r["priority"] for r in rows})
+
+
+@bp.route("/day-priorities", methods=["PUT"])
+@api_admin_required
+def save_day_priorities():
+    data = request.get_json()  # { "Monday": 1, "Tuesday": 3, ... }
+    with get_db() as conn:
+        for day, priority in data.items():
+            conn.execute(
+                "UPDATE day_priority SET priority=? WHERE day_of_week=?",
+                (int(priority), day)
+            )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+# ── Closed dates ──────────────────────────────────────────────────────────────
+
+@bp.route("/closed-dates")
+def get_closed_dates():
+    with get_db() as conn:
+        rows = conn.execute("SELECT date FROM closed_dates ORDER BY date").fetchall()
+    return jsonify([r["date"] for r in rows])
+
+
+@bp.route("/closed-dates", methods=["POST"])
+@api_admin_required
+def add_closed_date():
+    data = request.get_json()
+    date = (data.get("date") or "").strip()
+    if not date:
+        return jsonify({"error": "date required"}), 400
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO closed_dates (date) VALUES (?)", (date,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/closed-dates/<date>", methods=["DELETE"])
+@api_admin_required
+def delete_closed_date(date):
+    with get_db() as conn:
+        conn.execute("DELETE FROM closed_dates WHERE date=?", (date,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
 # ── Template needs (slot targets) ────────────────────────────────────────────
 
 @bp.route("/template/needs")
+@api_login_required
 def get_template_needs():
     with get_db() as conn:
         rows = conn.execute("""
@@ -213,9 +528,30 @@ def get_template_needs():
     return jsonify(needs)
 
 
+@bp.route("/template/needs", methods=["PUT"])
+@api_admin_required
+def save_template_needs():
+    """Replace all template needs. Body: [{ day, skill_id, quantity }, ...]"""
+    rows = request.get_json()
+    with get_db() as conn:
+        conn.execute("DELETE FROM template_needs WHERE template_id=1")
+        conn.execute("INSERT OR IGNORE INTO schedule_templates (id, name) VALUES (1, 'Weekly Template')")
+        for row in rows:
+            qty = int(row.get("quantity", 0))
+            if qty <= 0:
+                continue
+            conn.execute("""
+                INSERT INTO template_needs (template_id, day_of_week, skill_id, quantity)
+                VALUES (1, ?, ?, ?)
+            """, (row["day"], int(row["skill_id"]), qty))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
 # ── Block requests ───────────────────────────────────────────────────────────
 
 @bp.route("/blocks/<int:block_id>/requests")
+@api_login_required
 def get_requests(block_id):
     with get_db() as conn:
         rows = conn.execute("""
@@ -230,6 +566,7 @@ def get_requests(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/requests", methods=["POST"])
+@api_scheduler_required
 def set_request(block_id):
     data     = request.get_json()
     staff_id = data.get("staff_id")
@@ -249,6 +586,7 @@ def set_request(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/requests/delete", methods=["POST"])
+@api_scheduler_required
 def delete_request(block_id):
     data     = request.get_json()
     staff_id = data.get("staff_id")
@@ -294,6 +632,7 @@ def _fte_target(fte, tier_rows):
 # ── FTE tiers ─────────────────────────────────────────────────────────────────
 
 @bp.route("/fte-tiers")
+@api_login_required
 def get_fte_tiers():
     with get_db() as conn:
         rows = conn.execute(
@@ -303,6 +642,7 @@ def get_fte_tiers():
 
 
 @bp.route("/fte-tiers", methods=["POST"])
+@api_admin_required
 def create_fte_tier():
     data = request.get_json()
     try:
@@ -323,6 +663,7 @@ def create_fte_tier():
 
 
 @bp.route("/fte-tiers/<fte_str>", methods=["PUT"])
+@api_admin_required
 def update_fte_tier(fte_str):
     data = request.get_json()
     try:
@@ -343,6 +684,7 @@ def update_fte_tier(fte_str):
 
 
 @bp.route("/fte-tiers/<fte_str>", methods=["DELETE"])
+@api_admin_required
 def delete_fte_tier(fte_str):
     try:
         fte = round(float(fte_str), 4)
@@ -355,6 +697,7 @@ def delete_fte_tier(fte_str):
 
 
 @bp.route("/blocks/<int:block_id>/validate_fte")
+@api_login_required
 def validate_fte(block_id):
     with get_db() as conn:
         block = conn.execute(
@@ -419,6 +762,7 @@ def validate_fte(block_id):
     return jsonify({"warnings": warnings})
 
 @bp.route("/blocks/<int:block_id>/unavailability")
+@api_login_required
 def get_unavailability(block_id):
     with get_db() as conn:
         rows = conn.execute("""
@@ -431,6 +775,7 @@ def get_unavailability(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/unavailability", methods=["POST"])
+@api_scheduler_required
 def add_unavailability(block_id):
     data     = request.get_json()
     staff_id = data.get("staff_id")
@@ -447,6 +792,7 @@ def add_unavailability(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/unavailability/delete", methods=["POST"])
+@api_scheduler_required
 def delete_unavailability(block_id):
     data     = request.get_json()
     staff_id = data.get("staff_id")
@@ -461,6 +807,7 @@ def delete_unavailability(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/events")
+@api_login_required
 def get_block_events(block_id):
     """
     Return events for a block. If an optimized schedule exists, use that.
@@ -520,6 +867,7 @@ def get_block_events(block_id):
 # ── Optimize & Publish ───────────────────────────────────────────────────────
 
 @bp.route("/blocks/<int:block_id>/optimize", methods=["POST"])
+@api_scheduler_required
 def run_optimize(block_id):
     """Run the OR-Tools optimizer for a block and store the result."""
     try:
@@ -552,6 +900,7 @@ def run_optimize(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/optimized")
+@api_login_required
 def get_optimized(block_id):
     """Return the optimized schedule result for a block."""
     with get_db() as conn:
@@ -572,6 +921,7 @@ def get_optimized(block_id):
 
 
 @bp.route("/blocks/<int:block_id>/accept_optimized", methods=["POST"])
+@api_scheduler_required
 def accept_optimized(block_id):
     """Replace staff_requests with optimizer output. The optimizer output is the new grid."""
     with get_db() as conn:
@@ -615,6 +965,7 @@ def accept_optimized(block_id):
     return jsonify({"ok": True, "added": added})
 
 @bp.route('/blocks/<int:block_id>/publish', methods=['POST'])
+@api_admin_required
 def publish_block(block_id):
     with get_db() as conn:
         block = conn.execute(
@@ -690,6 +1041,7 @@ def publish_block(block_id):
 
 
 @bp.route('/blocks/<int:block_id>/publish-history')
+@api_login_required
 def get_publish_history(block_id):
     with get_db() as conn:
         rows = conn.execute("""
@@ -706,7 +1058,9 @@ def get_publish_history(block_id):
     } for r in rows])
 
 
+
 @bp.route("/blocks/<int:block_id>/optimized/events")
+@api_login_required
 def get_optimized_events(block_id):
     """Return optimized schedule as calendar events."""
     with get_db() as conn:
@@ -734,109 +1088,3 @@ def get_optimized_events(block_id):
             })
     return jsonify(events)
 
-
-# ── Test Runner ──────────────────────────────────────────────────────────────
-
-@bp.route("/run_tests", methods=["POST"])
-def run_tests():
-    """Run the adversarial test suite and return results as JSON."""
-    import sys, os, io, contextlib
-    from datetime import date as dt_date, timedelta
-    from collections import defaultdict
-
-    # Capture all output
-    output_buffer = io.StringIO()
-    tests   = []
-    current = None
-    r       = {"passed": 0, "failed": 0, "warned": 0}
-
-    def check(name, condition, detail=""):
-        status = "pass" if condition else "fail"
-        text   = name + (f": {detail}" if detail and not condition else "")
-        label  = "PASS" if condition else "FAIL"
-        line   = f"  {label} {text}"
-        output_buffer.write(line + "\n")
-        if current is not None:
-            current["checks"].append({"status": status, "text": text})
-        if condition:
-            r["passed"] += 1
-        else:
-            r["failed"] += 1
-
-    def warn(name, detail=""):
-        text = name + (f": {detail}" if detail else "")
-        output_buffer.write(f"  WARN {text}\n")
-        if current is not None:
-            current["checks"].append({"status": "warn", "text": text})
-        r["warned"] += 1
-
-    def section(title):
-        nonlocal current
-        if current is not None:
-            tests.append(current)
-        current = {"section": title, "checks": []}
-        output_buffer.write(f"\n-- {title}\n")
-
-    def run_opt(conn, block_id=1, time_limit=25):
-        from optimizer import optimize
-        import sys, os
-        devnull = open(os.devnull, 'w')
-        old_stderr = sys.stderr
-        sys.stderr = devnull
-        try:
-            return optimize(conn, block_id, time_limit_seconds=time_limit)
-        finally:
-            sys.stderr = old_stderr
-            devnull.close()
-
-    # Import helpers from test_adversarial
-    try:
-        import test_adversarial as ta
-    except ImportError:
-        return jsonify({"error": "test_adversarial.py not found in app directory"}), 404
-
-    # Override test_adversarial's globals with our capturing versions
-    ta.check        = check
-    ta.warn         = warn
-    ta.section      = section
-    ta.run_optimizer = run_opt
-    ta.results      = r
-
-    try:
-        ta.test_zero_slack()
-        ta.test_staff_unavailable_entire_block()
-        ta.test_entire_pay_period_unavailable()
-        ta.test_two_staff_same_week_unavailable()
-        ta.test_block_starts_friday()
-        ta.test_block_starts_sunday()
-        ta.test_only_one_tl_available()
-        ta.test_minimum_exceeds_qualified_staff()
-        ta.test_all_ecu_only_staff_unavailable()
-        ta.test_negative_required_shifts()
-        ta.test_fte_already_full_via_requests()
-        ta.test_all_staff_point_six_fte()
-        ta.test_multiple_optimizer_runs()
-        ta.test_rotation_history_affects_next_block()
-        ta.test_future_rotation_history()
-        ta.test_staff_with_no_skills()
-        ta.test_closed_date_in_middle()
-        ta.test_zero_quantity_template_need()
-        ta.test_all_days_closed()
-        ta.test_request_for_unqualified_skill()
-        ta.test_request_on_unavailable_day()
-        ta.test_two_staff_request_same_tl_slot()
-        ta.test_requests_exceed_fte()
-    except Exception as e:
-        import traceback
-        output_buffer.write(f"\nUnhandled error: {traceback.format_exc()}\n")
-
-    if current is not None:
-        tests.append(current)
-
-    return jsonify({
-        "tests":  tests,
-        "passed": r["passed"],
-        "failed": r["failed"],
-        "warned": r["warned"],
-        "raw":    output_buffer.getvalue(),
-    })

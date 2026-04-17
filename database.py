@@ -1,6 +1,7 @@
+import os
 import sqlite3
 
-DATABASE = "ir_schedule.db"
+DATABASE = os.environ.get("DATABASE_PATH", "ir_schedule.db")
 
 
 def get_db():
@@ -82,6 +83,10 @@ def init_db():
         if "is_casual" not in staff_cols:
             conn.execute("ALTER TABLE staff ADD COLUMN is_casual INTEGER NOT NULL DEFAULT 0")
 
+        user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "force_password_change" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN force_password_change INTEGER NOT NULL DEFAULT 0")
+
         tables = [r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()]
@@ -102,11 +107,23 @@ def init_db():
         if "closed_dates" not in tables:
             conn.execute("CREATE TABLE closed_dates (date TEXT PRIMARY KEY)")
 
-        # Seed admin
-        if not conn.execute("SELECT id FROM users WHERE username='admin'").fetchone():
+        # Seed admin with hashed password
+        import os
+        from werkzeug.security import generate_password_hash
+        admin_exists = conn.execute(
+            "SELECT id FROM users WHERE role='admin'"
+        ).fetchone()
+        if not admin_exists:
+            admin_username = os.environ.get("ADMIN_USERNAME")
+            admin_password = os.environ.get("ADMIN_PASSWORD")
+            if not admin_username or not admin_password:
+                raise RuntimeError(
+                    "ADMIN_USERNAME and ADMIN_PASSWORD environment variables must both be set. "
+                    "Add them to your .env file before starting the app."
+                )
             conn.execute(
                 "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                ("admin", "admin123", "admin")
+                (admin_username, generate_password_hash(admin_password), "admin")
             )
 
         # Seed day priorities

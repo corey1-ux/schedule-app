@@ -1,29 +1,3 @@
-"""
-optimizer.py
-------------
-OR-Tools CP-SAT optimizer for IR Schedule.
-
-Hard constraints:
-  - Unavailable staff cannot be assigned
-  - Staff must have the skill
-  - One skill per staff per day
-  - TL assigned → cannot fill any other skill that day
-  - FTE: ceiling per pay period (scaled for partial periods)
-  - FTE: floor per pay period for single-skill staff
-  - FTE: weekly ceiling (1.0→4/wk, 0.75→3/wk, 0.6→3/wk max)
-  - Rotation skills (IRC, ECU): at most once per week per staff
-  - Call: excluded from optimizer entirely
-
-Soft constraints (minimize):
-  TIER 1:  understaffing — penalty weighted by day priority × skill priority
-           Lower priority number = more important = higher penalty
-           Formula: (MAX_PRIO - day_prio) × (MAX_PRIO - skill_prio) × W_STAFFING
-  TIER 1b: under-FTE — encourage hitting pay-period targets
-  TIER 1c: rotation fairness — spread IRC/ECU evenly among multi-skilled staff
-  TIER 2  (weight 10): moves away from staff requests
-  TIER 3  (weight  1): IRC/ECU rotation recency penalty
-"""
-
 import sqlite3
 from datetime import date as dt_date, timedelta
 from ortools.sat.python import cp_model
