@@ -1,0 +1,434 @@
+/* Admin.css — shadcn-inspired */
+
+.adm-page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  font-family: 'Raleway', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── Page header ─────────────────────────────────────────── */
+.adm-page-header {
+  margin-bottom: 1.5rem;
+}
+
+.adm-page-header h1 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #09090b;
+  margin: 0 0 0.2rem;
+}
+
+.adm-page-meta {
+  font-size: 0.8125rem;
+  color: #71717a;
+}
+
+/* ── Tabs ────────────────────────────────────────────────── */
+.adm-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #e4e4e7;
+  margin-bottom: 1.5rem;
+}
+
+.adm-tab {
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #71717a;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.adm-tab:hover          { color: #09090b; }
+.adm-tab.active         { color: #09090b; border-bottom-color: #09090b; }
+
+/* ── Card ────────────────────────────────────────────────── */
+.adm-card {
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.625rem;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.adm-card-form {
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.adm-card-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+  margin: 0 0 1rem;
+}
+
+/* ── Section header ──────────────────────────────────────── */
+.adm-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.adm-section-header:first-child { margin-top: 0; }
+
+.adm-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #09090b;
+  margin: 0 0 0.2rem;
+}
+
+.adm-section-sub {
+  font-size: 0.78rem;
+  color: #71717a;
+  margin: 0;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.adm-btn-primary {
+  background: #09090b;
+  color: #fafafa;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.adm-btn-primary:hover    { background: #27272a; }
+.adm-btn-primary:disabled { background: #a1a1aa; cursor: default; }
+
+.adm-btn-ghost {
+  background: transparent;
+  color: #3f3f46;
+  border: 1px solid #e4e4e7;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.adm-btn-ghost:hover { background: #f4f4f5; }
+
+.adm-btn-destruct {
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid transparent;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.adm-btn-destruct:hover { background: #fef2f2; border-color: #fecaca; }
+
+.adm-btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  font-family: inherit;
+}
+.adm-btn-danger:hover { background: #dc2626; }
+
+/* ── Table ───────────────────────────────────────────────── */
+.adm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.adm-table thead th {
+  padding: 0.625rem 1rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.adm-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f4f4f5;
+  vertical-align: middle;
+  color: #18181b;
+}
+
+.adm-table tbody tr:last-child td { border-bottom: none; }
+.adm-table tbody tr.adm-row-active td { background: #fafafa; }
+.adm-table tbody tr:hover:not(.adm-edit-row) td { background: #fafafa; }
+
+.adm-col-name    { font-weight: 500; }
+.adm-col-actions {
+  width: 160px;
+  text-align: right;
+}
+.adm-col-actions-inner,
+.adm-delete-confirm {
+  display: flex;
+  gap: 0.375rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.adm-edit-row td {
+  padding: 1rem;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+/* ── Input / Label ───────────────────────────────────────── */
+.adm-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+  display: block;
+  margin-bottom: 0.375rem;
+}
+
+.adm-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #09090b;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  font-family: inherit;
+  width: 100%;
+}
+.adm-input:focus {
+  border-color: #71717a;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+}
+
+.adm-input-sm { width: 80px; }
+
+/* ── Form row ────────────────────────────────────────────── */
+.adm-form-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.adm-field {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Badge ───────────────────────────────────────────────── */
+.adm-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #3f3f46;
+}
+.adm-badge-ok   { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.adm-badge-warn { background: #fefce8; border-color: #fef08a; color: #854d0e; }
+
+/* ── Confirm ─────────────────────────────────────────────── */
+.adm-confirm-text {
+  font-size: 0.8rem;
+  color: #b91c1c;
+  font-weight: 500;
+}
+
+/* ── Empty ───────────────────────────────────────────────── */
+.adm-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: #a1a1aa;
+  font-size: 0.875rem;
+}
+
+/* ── Error ───────────────────────────────────────────────── */
+.adm-error {
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: #ef4444;
+}
+
+/* ── Template grid ───────────────────────────────────────── */
+.adm-template-wrap {
+  overflow-x: auto;
+}
+
+.adm-template-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.adm-template-grid th {
+  padding: 0.625rem 0.875rem;
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.adm-template-grid th.adm-th-skill {
+  text-align: left;
+  min-width: 120px;
+}
+
+.adm-template-grid td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #f4f4f5;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.adm-template-grid td.adm-td-skill {
+  text-align: left;
+  font-weight: 500;
+  color: #09090b;
+}
+
+.adm-template-grid tbody tr:last-child td { border-bottom: none; }
+
+.adm-template-grid .adm-qty-input {
+  width: 56px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.3rem;
+  font-size: 0.8125rem;
+  text-align: center;
+  color: #09090b;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.adm-template-grid .adm-qty-input:focus {
+  border-color: #71717a;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+}
+
+/* Priority row under the day headers */
+.adm-priority-row td {
+  background: #fafafa;
+  border-bottom: 2px solid #e4e4e7 !important;
+  padding: 0.375rem 0.75rem;
+}
+
+.adm-priority-row .adm-priority-input {
+  width: 56px;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  text-align: center;
+  color: #52525b;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.12s;
+}
+.adm-priority-row .adm-priority-input:focus { border-color: #71717a; }
+
+.adm-priority-label {
+  font-size: 0.65rem;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+/* ── Template save bar ───────────────────────────────────── */
+.adm-template-footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f4f4f5;
+  margin-top: 0.5rem;
+}
+
+.adm-save-msg {
+  font-size: 0.8125rem;
+  color: #16a34a;
+  font-weight: 500;
+}
+
+/* ── Closed dates ────────────────────────────────────────── */
+.adm-date-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.adm-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.6rem 0.3rem 0.75rem;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #18181b;
+}
+
+.adm-date-chip button {
+  background: none;
+  border: none;
+  color: #a1a1aa;
+  font-size: 0.85rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  font-family: inherit;
+  transition: color 0.12s;
+}
+.adm-date-chip button:hover { color: #dc2626; }
+
+.adm-date-add {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-end;
+  padding: 1rem;
+  border-top: 1px solid #f4f4f5;
+}

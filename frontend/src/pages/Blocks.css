@@ -1,0 +1,233 @@
+/* Blocks.css — shadcn-inspired */
+
+.bl-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* ── Page header ─────────────────────────────────────────── */
+.bl-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.bl-page-title h1 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #09090b;
+  margin: 0 0 0.2rem;
+}
+
+.bl-page-meta {
+  font-size: 0.8125rem;
+  color: #71717a;
+}
+
+/* ── Card ────────────────────────────────────────────────── */
+.bl-card {
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.625rem;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.bl-card-form {
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.bl-card-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+  margin: 0 0 1rem;
+}
+
+/* ── Create form ─────────────────────────────────────────── */
+.bl-form-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.bl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.bl-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+}
+
+.bl-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.4rem;
+  font-size: 0.875rem;
+  color: #09090b;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  min-width: 220px;
+}
+
+.bl-input:focus {
+  border-color: #71717a;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.bl-btn-primary {
+  background: #09090b;
+  color: #fafafa;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.bl-btn-primary:hover { background: #27272a; }
+
+.bl-btn-ghost {
+  background: transparent;
+  color: #3f3f46;
+  border: 1px solid #e4e4e7;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
+}
+.bl-btn-ghost:hover { background: #f4f4f5; }
+
+.bl-btn-link {
+  background: #09090b;
+  color: #fafafa;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.12s;
+}
+.bl-btn-link:hover { background: #27272a; color: #fafafa; }
+
+.bl-btn-destruct {
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid transparent;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.bl-btn-destruct:hover { background: #fef2f2; border-color: #fecaca; }
+
+/* ── Table ───────────────────────────────────────────────── */
+.bl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.bl-table thead th {
+  padding: 0.625rem 1rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.bl-table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid #f4f4f5;
+  vertical-align: middle;
+  color: #18181b;
+}
+
+.bl-table tbody tr:last-child td { border-bottom: none; }
+.bl-table tbody tr:hover td      { background: #fafafa; }
+
+.bl-col-name   { font-weight: 500; }
+.bl-col-date   { color: #52525b; font-size: 0.8125rem; }
+.bl-col-status { width: 110px; }
+.bl-col-actions {
+  width: 140px;
+  text-align: right;
+}
+.bl-col-actions-inner {
+  display: flex;
+  gap: 0.375rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ── Badge ───────────────────────────────────────────────── */
+.bl-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.bl-badge-draft     { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.bl-badge-published { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+
+/* ── Empty ───────────────────────────────────────────────── */
+.bl-empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #a1a1aa;
+  font-size: 0.875rem;
+}
+
+/* ── Confirm inline ──────────────────────────────────────── */
+.bl-confirm-text {
+  font-size: 0.8rem;
+  color: #b91c1c;
+  font-weight: 500;
+}
+
+.bl-btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.bl-btn-danger:hover { background: #dc2626; }

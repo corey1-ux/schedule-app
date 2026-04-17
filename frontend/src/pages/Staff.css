@@ -1,0 +1,363 @@
+/* Staff.css — shadcn-inspired */
+
+.sf-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  font-family: 'Raleway', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── Page header ─────────────────────────────────────────── */
+.sf-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.sf-page-title h1 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #09090b;
+  margin: 0 0 0.2rem;
+}
+
+.sf-page-meta {
+  font-size: 0.8125rem;
+  color: #71717a;
+}
+
+/* ── Card ────────────────────────────────────────────────── */
+.sf-card {
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.625rem;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.sf-card-form {
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.sf-card-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+  margin: 0 0 1.125rem;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.sf-btn-primary {
+  background: #09090b;
+  color: #fafafa;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.sf-btn-primary:hover    { background: #27272a; }
+.sf-btn-primary:disabled { background: #a1a1aa; cursor: default; }
+
+.sf-btn-ghost {
+  background: transparent;
+  color: #3f3f46;
+  border: 1px solid #e4e4e7;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.sf-btn-ghost:hover   { background: #f4f4f5; }
+.sf-btn-ghost.sf-active { background: #f4f4f5; border-color: #a1a1aa; }
+
+.sf-btn-destruct       { color: #b91c1c; border-color: transparent; }
+.sf-btn-destruct:hover { background: #fef2f2; border-color: #fecaca; }
+
+.sf-btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sf-btn-danger:hover { background: #dc2626; }
+
+/* ── Table ───────────────────────────────────────────────── */
+.sf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.sf-table thead th {
+  padding: 0.625rem 1rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+}
+
+.sf-table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid #f4f4f5;
+  vertical-align: middle;
+  color: #18181b;
+}
+
+.sf-table tbody tr:last-child > td { border-bottom: none; }
+.sf-table tbody tr.sf-row-active > td { background: #fafafa; }
+.sf-table tbody tr:hover:not(.sf-edit-row) > td { background: #fafafa; }
+
+.sf-col-name  { font-weight: 500; }
+.sf-col-fte   { width: 100px; }
+.sf-col-skills { }
+.sf-col-actions {
+  width: 160px;
+  text-align: right;
+}
+.sf-col-actions > *,
+.sf-delete-confirm {
+  display: flex;
+  gap: 0.375rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ── Badges ──────────────────────────────────────────────── */
+.sf-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 9999px;
+  font-size: 0.7375rem;
+  font-weight: 600;
+  color: #3f3f46;
+  white-space: nowrap;
+}
+
+.sf-badge-casual {
+  background: #fafafa;
+  border-color: #d4d4d8;
+  color: #71717a;
+  font-style: italic;
+}
+
+.sf-skill-tag {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  background: #f4f4f5;
+  border-radius: 0.3rem;
+  font-size: 0.75rem;
+  color: #52525b;
+  margin: 0.1rem 0.15rem 0.1rem 0;
+}
+
+.sf-no-skills { color: #a1a1aa; font-size: 0.875rem; }
+
+/* ── Delete confirm ──────────────────────────────────────── */
+.sf-confirm-text {
+  font-size: 0.8rem;
+  color: #b91c1c;
+  font-weight: 500;
+  margin-right: 0.25rem;
+}
+
+/* ── Edit row ────────────────────────────────────────────── */
+.sf-edit-row > td {
+  padding: 1.25rem 1rem;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+/* ── Form ────────────────────────────────────────────────── */
+.sf-form-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.sf-form-grid > .sf-field:first-child {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.sf-form-grid > .sf-field:not(:first-child) {
+  flex: 0 0 auto;
+}
+
+.sf-field { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.sf-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #71717a;
+}
+
+.sf-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.4rem;
+  font-size: 0.875rem;
+  color: #09090b;
+  background: #fff;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.sf-input:focus {
+  border-color: #71717a;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+}
+
+/* ── FTE button group ────────────────────────────────────── */
+.sf-fte-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sf-fte-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: #09090b;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: left;
+  white-space: nowrap;
+}
+.sf-fte-btn:hover { background: #f4f4f5; border-color: #a1a1aa; color: #09090b; }
+.sf-fte-btn.active {
+  background: #09090b;
+  border-color: #09090b;
+  color: #fafafa;
+}
+
+.sf-fte-val {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.sf-fte-sub {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  line-height: 1.3;
+}
+
+/* ── Skill button group ──────────────────────────────────── */
+.sf-skill-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sf-skill-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: #09090b;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: left;
+}
+.sf-skill-btn:hover { background: #f4f4f5; border-color: #a1a1aa; color: #09090b; }
+.sf-skill-btn.active {
+  background: #09090b;
+  border-color: #09090b;
+  color: #fafafa;
+}
+
+/* ── Form footer ─────────────────────────────────────────── */
+.sf-form-footer {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f4f4f5;
+}
+
+/* ── Section header (used for FTE Tiers / Members dividers) */
+.sf-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 1.75rem 0 0.75rem;
+}
+
+.sf-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #09090b;
+  margin: 0 0 0.2rem;
+}
+
+.sf-section-sub {
+  font-size: 0.78rem;
+  color: #71717a;
+  margin: 0;
+  max-width: 560px;
+}
+
+/* ── Tier inline form ────────────────────────────────────── */
+.sf-tier-form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.sf-tier-form-actions {
+  display: flex;
+  gap: 0.375rem;
+  padding-bottom: 1px; /* align with inputs */
+}
+
+.sf-input-sm {
+  width: 120px;
+}
+
+/* ── Misc ────────────────────────────────────────────────── */
+.sf-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  color: #ef4444;
+}
+
+.sf-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: #a1a1aa;
+  font-size: 0.875rem;
+}
