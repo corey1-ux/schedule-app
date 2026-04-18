@@ -599,6 +599,124 @@ function UsersTab({ currentUser }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Blocks tab (rename only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function BlocksTab() {
+  const [blocks,  setBlocks]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editId,  setEditId]  = useState(null);
+  const [editName, setEditName] = useState('');
+
+  const load = useCallback(() =>
+    fetch('/api/blocks').then(r => r.json()).then(d => { setBlocks(d); setLoading(false); })
+  , []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const startEdit = (b) => { setEditId(b.id); setEditName(b.name); };
+
+  const handleRename = async (id) => {
+    if (!editName.trim()) return;
+    await fetch(`/api/blocks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editName.trim() }),
+    });
+    setEditId(null);
+    load();
+  };
+
+  const years = [...new Set(blocks.map(b =>
+    new Date(b.start_date + 'T00:00:00').getFullYear()
+  ))].sort((a, b) => b - a);
+
+  if (loading) return <p className="adm-empty">Loading…</p>;
+
+  return (
+    <>
+      <div className="adm-section-header">
+        <div>
+          <h2 className="adm-section-title">Blocks</h2>
+          <p className="adm-section-sub">Rename schedule blocks. Create and delete blocks from the Blocks page.</p>
+        </div>
+      </div>
+
+      {years.map(year => (
+        <div key={year} className="adm-card" style={{ marginBottom: '1rem' }}>
+          <div className="adm-blocks-year-header">{year}</div>
+          <table className="adm-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Dates</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {blocks
+                .filter(b => new Date(b.start_date + 'T00:00:00').getFullYear() === year)
+                .map(b => (
+                  <>
+                    <tr key={b.id} className={editId === b.id ? 'adm-row-active' : ''}>
+                      <td className="adm-col-name">{b.name}</td>
+                      <td style={{ fontSize: '0.8125rem', color: '#52525b' }}>
+                        {b.start_date} – {b.end_date}
+                      </td>
+                      <td>
+                        <span className={`adm-badge${b.status === 'published' ? ' adm-badge-ok' : ''}`}>
+                          {b.status}
+                        </span>
+                      </td>
+                      <td className="adm-col-actions">
+                        <div className="adm-col-actions-inner">
+                          <button
+                            className="adm-btn-ghost"
+                            onClick={() => editId === b.id ? setEditId(null) : startEdit(b)}
+                          >
+                            {editId === b.id ? 'Cancel' : 'Rename'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {editId === b.id && (
+                      <tr key={`edit-${b.id}`} className="adm-edit-row">
+                        <td colSpan={4}>
+                          <div className="adm-form-row">
+                            <div className="adm-field" style={{ flex: '1 1 240px' }}>
+                              <label className="adm-label">New Name</label>
+                              <input
+                                className="adm-input"
+                                value={editName}
+                                onChange={e => setEditName(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleRename(b.id)}
+                                autoFocus
+                              />
+                            </div>
+                            <button className="adm-btn-primary" onClick={() => handleRename(b.id)}>
+                              Save
+                            </button>
+                            <button className="adm-btn-ghost" onClick={() => setEditId(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+
+      {blocks.length === 0 && <p className="adm-empty">No blocks yet.</p>}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Admin page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -608,6 +726,7 @@ const TABS = [
   { id: 'skills',   label: 'Skills'       },
   { id: 'template', label: 'Template'     },
   { id: 'closed',   label: 'Closed Dates' },
+  { id: 'blocks',   label: 'Blocks'       },
 ];
 
 export default function Admin({ user }) {
@@ -637,6 +756,7 @@ export default function Admin({ user }) {
       {tab === 'skills'   && <SkillsTab />}
       {tab === 'template' && <TemplateTab />}
       {tab === 'closed'   && <ClosedDatesTab />}
+      {tab === 'blocks'   && <BlocksTab />}
     </div>
   );
 }

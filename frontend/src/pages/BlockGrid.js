@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import './BlockGrid.css';
 
@@ -225,6 +225,12 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
   const [fteTiers, setFteTiers]         = useState([]);
   const [publishHistory, setHistory]    = useState([]);
   const [showAudit, setShowAudit]       = useState(false);
+  const [viewMode, setViewMode]         = useState('skill'); // 'skill' | 'staff'
+  const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
+  const [fullscreen, setFullscreen]     = useState(false);
+  const [dragSource, setDragSource]     = useState(null); // { staffId, staffName, date, skillId }
+  const [dragOverKey, setDragOverKey]   = useState(null); // 'date|skillId'
+  const viewDropdownRef = useRef(null);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -266,6 +272,17 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
   useEffect(() => {
     if (id) load();
   }, [id, load]);
+
+  useEffect(() => {
+    if (!viewDropdownOpen) return;
+    function handleClickOutside(e) {
+      if (viewDropdownRef.current && !viewDropdownRef.current.contains(e.target)) {
+        setViewDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [viewDropdownOpen]);
 
   const shiftCount = useCallback((staffId) => {
     let count = 0;
@@ -399,6 +416,68 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
     }, 5000);
   }, []);
 
+  const handleDragStart = useCallback((e, staffId, staffName, date, skillId) => {
+    setDragSource({ staffId, staffName, date, skillId });
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDragSource(null);
+    setDragOverKey(null);
+  }, []);
+
+  const handleDragOver = useCallback((e, date, skillId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverKey(`${date}|${skillId}`);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOverKey(null);
+  }, []);
+
+  const handleDrop = useCallback((e, targetDate, targetSkillId) => {
+    e.preventDefault();
+    setDragOverKey(null);
+    if (!dragSource) return;
+
+    const { staffId, staffName, date: sourceDate, skillId: sourceSkillId } = dragSource;
+    if (sourceDate === targetDate && sourceSkillId === targetSkillId) return;
+
+    const targetEntries = requests[`${targetDate}|${targetSkillId}`] || [];
+    if (targetEntries.some(en => en.staff_id === staffId)) {
+      addToast(`${staffName} is already assigned on ${targetDate}.`, 'error');
+      return;
+    }
+
+    const targetSkill = skills.find(s => s.id === targetSkillId);
+    const member = staff.find(s => s.id === staffId);
+    const hasSkill = targetSkill?.name === 'Call' || member?.skills.some(s => s.id === targetSkillId);
+    if (!hasSkill) {
+      addToast(`${staffName} does not have the ${targetSkill?.name} skill.`, 'error');
+      return;
+    }
+
+    const doMove = () =>
+      fetch(`/api/blocks/${id}/requests/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_id: staffId, date: sourceDate, skill_id: sourceSkillId }),
+      }).then(() =>
+        fetch(`/api/blocks/${id}/requests`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staff_id: staffId, date: targetDate, skill_id: targetSkillId }),
+        })
+      ).then(load);
+
+    if (isUnavailable(staffId, targetDate)) {
+      if (window.confirm(`${staffName} is marked unavailable on ${targetDate}. Assign anyway?`)) doMove();
+    } else {
+      doMove();
+    }
+  }, [dragSource, requests, skills, staff, id, load, isUnavailable, addToast]);
+
   const handlePublish = useCallback(() => {
     const isRepub = block?.status === 'published';
     const msg = isRepub
@@ -531,6 +610,30 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
             </button>
           </>
         )}
+        <div className="view-dropdown-wrapper" ref={viewDropdownRef}>
+          <button
+            className="btn-view-toggle"
+            onClick={() => setViewDropdownOpen(v => !v)}
+          >
+            {viewMode === 'skill' ? 'By Skill' : 'By Staff'} ▾
+          </button>
+          {viewDropdownOpen && (
+            <div className="view-dropdown">
+              <button
+                className={`view-dropdown-item${viewMode === 'skill' ? ' active' : ''}`}
+                onClick={() => { setViewMode('skill'); setViewDropdownOpen(false); }}
+              >
+                By Skill
+              </button>
+              <button
+                className={`view-dropdown-item${viewMode === 'staff' ? ' active' : ''}`}
+                onClick={() => { setViewMode('staff'); setViewDropdownOpen(false); }}
+              >
+                By Staff Member
+              </button>
+            </div>
+          )}
+        </div>
         {publishHistory.length > 0 && !readOnly && (
           <button
             className="btn-audit-toggle"
@@ -579,6 +682,15 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
         </div>
       )}
 
+      <div className={`grid-container${fullscreen ? ' grid-fullscreen' : ''}`}>
+        <button
+          className="btn-fullscreen"
+          onClick={() => setFullscreen(v => !v)}
+          title={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        >
+          {fullscreen ? '✕' : '⛶'}
+        </button>
+
       <div className="grid-layout">
 
         {/* Roster */}
@@ -625,7 +737,7 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
                 ))}
               </tr>
               <tr className="date-row">
-                <th className="skill-col">Skill</th>
+                <th className="skill-col">{viewMode === 'staff' ? 'Staff' : 'Skill'}</th>
                 {dates.map(d => (
                   <th key={d} className={`date-col ${isWeekend(d) ? 'weekend' : ''}`}>
                     <div className="date-day">{getDayName(d).slice(0, 3)}</div>
@@ -636,96 +748,143 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
             </thead>
 
             <tbody>
-              {/* Unavailability row */}
-              <tr className="skill-row unavail-row">
-                <td className="skill-label skill-label-unavail">Unavailable</td>
-                {dates.map(d => {
-                  const entries = unavail[d] || [];
-                  return (
-                    <td
-                      key={d}
-                      className={`cell cell-unavail ${mode === 'assign' && selected ? 'clickable' : ''}`}
-                      onClick={() => handleUnavailClick(d)}
-                    >
-                      <div className="cell-names">
-                        {entries.map(u => (
-                          <span key={u.staff_id} className="name-tag unavail-tag">
-                            {u.staff_name}
-                            {!readOnly && (
-                              <button className="remove-btn" onClick={ev => handleUnavailRemove(ev, d, u.staff_id)}>×</button>
+              {viewMode === 'skill' ? (
+                <>
+                  {/* Skill rows */}
+                  {skills.map(skill => (
+                    <tr key={skill.id} className="skill-row">
+                      <td className="skill-label">{skill.name}</td>
+                      {dates.map(d => {
+                        const weekend = isWeekend(d);
+                        const isCall  = skill.name === 'Call';
+
+                        if (weekend && !isCall) {
+                          return <td key={d} className="cell cell-closed" />;
+                        }
+
+                        const key     = `${d}|${skill.id}`;
+                        const entries = requests[key] || [];
+                        const target  = getTarget(d, skill.id);
+                        const count   = entries.length;
+
+                        const statusClass = count === 0    ? 'cell-empty'
+                                          : count < target  ? 'cell-under'
+                                          : count === target ? 'cell-met'
+                                          : 'cell-over';
+
+                        const targetLabel = target > 0
+                          ? count < target   ? 'under'
+                          : count === target ? 'met'
+                          : 'over'
+                          : '';
+
+                        const cellKey = `${d}|${skill.id}`;
+                        const isDragOver = dragOverKey === cellKey;
+
+                        return (
+                          <td
+                            key={d}
+                            className={`cell ${statusClass} ${isCall && weekend ? 'cell-weekend-call' : ''} ${mode === 'assign' && selected ? 'clickable' : ''} ${isDragOver ? 'drag-over' : ''}`}
+                            onClick={() => mode === 'assign' && handleCellClick(d, skill.id)}
+                            onDragOver={!readOnly ? e => handleDragOver(e, d, skill.id) : undefined}
+                            onDragLeave={!readOnly ? handleDragLeave : undefined}
+                            onDrop={!readOnly ? e => handleDrop(e, d, skill.id) : undefined}
+                          >
+                            {target > 0 && (
+                              <div className={`cell-target ${targetLabel}`}>{count}/{target}</div>
                             )}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
 
-              {/* Skill rows */}
-              {skills.map(skill => (
-                <tr key={skill.id} className="skill-row">
-                  <td className="skill-label">{skill.name}</td>
-                  {dates.map(d => {
-                    const weekend = isWeekend(d);
-                    const isCall  = skill.name === 'Call';
+                            <div className="cell-names">
+                              {entries.map(e => {
+                                const unavailable = isUnavailable(e.staff_id, d);
+                                return (
+                                  <span
+                                    key={e.staff_id}
+                                    className={`name-tag ${isCall ? 'call' : ''} ${unavailable ? 'name-tag-conflict' : ''} ${mode === 'delete' ? 'deletable' : ''}`}
+                                    draggable={!readOnly && mode !== 'delete'}
+                                    onDragStart={!readOnly && mode !== 'delete' ? ev => handleDragStart(ev, e.staff_id, e.staff_name, d, skill.id) : undefined}
+                                    onDragEnd={!readOnly && mode !== 'delete' ? handleDragEnd : undefined}
+                                    title={
+                                      mode === 'delete' ? `Remove ${e.staff_name}` :
+                                      unavailable ? `${e.staff_name} is marked unavailable!` : ''
+                                    }
+                                    onClick={mode === 'delete' ? ev => handleRemove(ev, d, skill.id, e.staff_id) : undefined}
+                                  >
+                                    {unavailable ? '⚠ ' : ''}{e.staff_name}
+                                    {!readOnly && mode !== 'delete' && (
+                                      <button className="remove-btn" onClick={ev => handleRemove(ev, d, skill.id, e.staff_id)}>×</button>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
 
-                    if (weekend && !isCall) {
-                      return <td key={d} className="cell cell-closed" />;
-                    }
-
-                    const key     = `${d}|${skill.id}`;
-                    const entries = requests[key] || [];
-                    const target  = getTarget(d, skill.id);
-                    const count   = entries.length;
-
-                    const statusClass = count === 0    ? 'cell-empty'
-                                      : count < target  ? 'cell-under'
-                                      : count === target ? 'cell-met'
-                                      : 'cell-over';
-
-                    const targetLabel = target > 0
-                      ? count < target   ? 'under'
-                      : count === target ? 'met'
-                      : 'over'
-                      : '';
-
-                    return (
-                      <td
-                        key={d}
-                        className={`cell ${statusClass} ${isCall && weekend ? 'cell-weekend-call' : ''} ${mode === 'assign' && selected ? 'clickable' : ''}`}
-                        onClick={() => mode === 'assign' && handleCellClick(d, skill.id)}
-                      >
-                        {target > 0 && (
-                          <div className={`cell-target ${targetLabel}`}>{count}/{target}</div>
-                        )}
-
-                        <div className="cell-names">
-                          {entries.map(e => {
-                            const unavailable = isUnavailable(e.staff_id, d);
-                            return (
-                              <span
-                                key={e.staff_id}
-                                className={`name-tag ${isCall ? 'call' : ''} ${unavailable ? 'name-tag-conflict' : ''} ${mode === 'delete' ? 'deletable' : ''}`}
-                                title={
-                                  mode === 'delete' ? `Remove ${e.staff_name}` :
-                                  unavailable ? `${e.staff_name} is marked unavailable!` : ''
-                                }
-                                onClick={mode === 'delete' ? ev => handleRemove(ev, d, skill.id, e.staff_id) : undefined}
-                              >
-                                {unavailable ? '⚠ ' : ''}{e.staff_name}
-                                {!readOnly && mode !== 'delete' && (
-                                  <button className="remove-btn" onClick={ev => handleRemove(ev, d, skill.id, e.staff_id)}>×</button>
+                  {/* Unavailability row */}
+                  <tr className="skill-row unavail-row">
+                    <td className="skill-label skill-label-unavail">Unavailable</td>
+                    {dates.map(d => {
+                      const entries = unavail[d] || [];
+                      return (
+                        <td
+                          key={d}
+                          className={`cell cell-unavail ${mode === 'assign' && selected ? 'clickable' : ''}`}
+                          onClick={() => handleUnavailClick(d)}
+                        >
+                          <div className="cell-names">
+                            {entries.map(u => (
+                              <span key={u.staff_id} className="name-tag unavail-tag">
+                                {u.staff_name}
+                                {!readOnly && (
+                                  <button className="remove-btn" onClick={ev => handleUnavailRemove(ev, d, u.staff_id)}>×</button>
                                 )}
                               </span>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                            ))}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </>
+              ) : (
+                <>
+                  {/* Staff rows */}
+                  {sortedStaff.map(s => (
+                    <tr key={s.id} className="skill-row">
+                      <td className="skill-label">{s.name}</td>
+                      {dates.map(d => {
+                        const assignedSkills = skills.filter(skill => {
+                          const key = `${d}|${skill.id}`;
+                          return (requests[key] || []).some(e => e.staff_id === s.id);
+                        });
+                        const isUnavail = isUnavailable(s.id, d);
+                        const hasWork = assignedSkills.length > 0;
+                        return (
+                          <td
+                            key={d}
+                            className={`cell ${isWeekend(d) && !assignedSkills.some(sk => sk.name === 'Call') ? 'cell-closed' : hasWork ? 'cell-met' : 'cell-empty'}`}
+                          >
+                            <div className="cell-names">
+                              {isUnavail && (
+                                <span className="name-tag unavail-tag">Unavailable</span>
+                              )}
+                              {assignedSkills.map(skill => (
+                                <span key={skill.id} className={`name-tag ${skill.name === 'Call' ? 'call' : ''}`}>
+                                  {skill.name}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </>
+              )}
             </tbody>
           </table>
         </div>
@@ -743,6 +902,7 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
           onClose={() => setShiftSummary(null)}
         />
       )}
+      </div>
     </div>
   );
 }

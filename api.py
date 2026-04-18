@@ -235,16 +235,25 @@ def get_blocks():
 @api_scheduler_required
 def create_block():
     data       = request.get_json()
-    name       = data.get("name", "").strip()
     start_date = data.get("start_date", "").strip()
-    if not name or not start_date:
-        return jsonify({"error": "name and start_date required"}), 400
+    if not start_date:
+        return jsonify({"error": "start_date required"}), 400
     try:
         start = dt_date.fromisoformat(start_date)
     except ValueError:
         return jsonify({"error": "Invalid date"}), 400
     end = start + timedelta(weeks=8) - timedelta(days=1)
+    name = f"{start.month}/{start.day} \u2013 {end.month}/{end.day}"
     with get_db() as conn:
+        overlap = conn.execute(
+            """SELECT name, start_date, end_date FROM schedule_blocks
+               WHERE start_date <= ? AND end_date >= ?""",
+            (end.isoformat(), start.isoformat())
+        ).fetchone()
+        if overlap:
+            return jsonify({
+                "error": f'Overlaps with existing block "{overlap["name"]}" ({overlap["start_date"]} – {overlap["end_date"]})'
+            }), 409
         conn.execute(
             "INSERT INTO schedule_blocks (name, start_date, end_date) VALUES (?, ?, ?)",
             (name, start.isoformat(), end.isoformat())
@@ -263,6 +272,19 @@ def get_block(block_id):
         if not block:
             return jsonify({"error": "not found"}), 404
     return jsonify(dict(block))
+
+
+@bp.route("/blocks/<int:block_id>", methods=["PUT"])
+@api_scheduler_required
+def rename_block(block_id):
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    with get_db() as conn:
+        conn.execute("UPDATE schedule_blocks SET name = ? WHERE id = ?", (name, block_id))
+        conn.commit()
+    return jsonify({"ok": True})
 
 
 @bp.route("/blocks/<int:block_id>", methods=["DELETE"])
