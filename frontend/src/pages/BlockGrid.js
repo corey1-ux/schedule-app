@@ -29,175 +29,138 @@ function getMonthLabel(dateStr) {
   return d.toLocaleString('default', { month: 'short', year: 'numeric' });
 }
 
-function ShiftSummaryPanel({ requests, unavail, staff, block, fteTiers, onClose }) {
-  const lookupFteTier = (fte) => {
-    const sorted = [...fteTiers].sort((a, b) => b.fte - a.fte);
-    for (const t of sorted) if (Math.abs(t.fte - fte) < 0.001) return t;
-    for (const t of sorted) if (t.fte <= fte) return t;
-    return sorted[sorted.length - 1] || { shifts_per_week: 3, shifts_per_pp: 5 };
-  };
+function SkillCoveragePanel({ requests, block, skills, needs, onClose }) {
   if (!block) return null;
 
-  const allDates = [];
-  let d = new Date(block.start_date + 'T00:00:00');
-  const end = new Date(block.end_date + 'T00:00:00');
-  while (d <= end) {
-    allDates.push(d.toISOString().slice(0, 10));
-    d.setDate(d.getDate() + 1);
-  }
+  const weekdayDates = getDates(block.start_date, block.end_date).filter(d => !isWeekend(d));
 
-  const blockStartDate = new Date(block.start_date + 'T00:00:00');
-  const dayOfWeek = blockStartDate.getDay();
-  const firstSunday = new Date(blockStartDate);
-  firstSunday.setDate(firstSunday.getDate() - dayOfWeek);
-
+  // Group Mon–Fri into calendar weeks
   const weeks = [];
-  let wkStart = new Date(firstSunday);
-  while (wkStart <= end) {
-    const wkEnd = new Date(wkStart);
-    wkEnd.setDate(wkEnd.getDate() + 6);
-    const wkDates = allDates.filter(dt => {
-      const dtDate = new Date(dt + 'T00:00:00');
-      return dtDate >= wkStart && dtDate <= wkEnd;
-    });
-    if (wkDates.length > 0) weeks.push(wkDates);
-    wkStart.setDate(wkStart.getDate() + 7);
-  }
-
-  const payPeriods = [];
-  const blockStartD = new Date(block.start_date + 'T00:00:00');
-  const daysToSun   = blockStartD.getDay();
-  const ppAnchor    = new Date(blockStartD);
-  ppAnchor.setDate(ppAnchor.getDate() - daysToSun);
-  let ps = new Date(ppAnchor);
-  while (ps <= end) {
-    const pe = new Date(ps);
-    pe.setDate(pe.getDate() + 13);
-    payPeriods.push({
-      start: ps.toISOString().slice(0, 10),
-      end:   pe.toISOString().slice(0, 10),
-    });
-    ps = new Date(pe);
-    ps.setDate(ps.getDate() + 1);
-  }
-
-  const fteTarget = (fte) => lookupFteTier(fte).shifts_per_pp;
-  const weeklyMax = (fte) => lookupFteTier(fte).shifts_per_week;
-
-  const workedDates = {};
-  staff.forEach(s => { workedDates[s.id] = new Set(); });
-  Object.entries(requests).forEach(([key, entries]) => {
-    const date = key.split('|')[0];
-    entries.forEach(e => {
-      if (workedDates[e.staff_id]) workedDates[e.staff_id].add(date);
-    });
+  let wk = [];
+  weekdayDates.forEach(d => {
+    wk.push(d);
+    if (getDayName(d) === 'Friday') { weeks.push(wk); wk = []; }
   });
+  if (wk.length) weeks.push(wk);
 
-  const unavailDates = {};
-  staff.forEach(s => { unavailDates[s.id] = new Set(); });
-  Object.entries(unavail).forEach(([date, entries]) => {
-    entries.forEach(e => {
-      if (unavailDates[e.staff_id]) unavailDates[e.staff_id].add(date);
-    });
-  });
-
-  const weeklyShifts = {};
-  staff.forEach(s => {
-    weeklyShifts[s.id] = weeks.map(wk => {
-      const weekdays = wk.filter(dt => {
-        const day = new Date(dt + 'T00:00:00').getDay();
-        return day >= 1 && day <= 5;
-      });
-      return weekdays.filter(dt => workedDates[s.id].has(dt)).length;
-    });
-  });
-
-  const ppTotals = {};
-  staff.forEach(s => {
-    ppTotals[s.id] = payPeriods.map(pp => {
-      let shifts = 0, unavailCount = 0;
-      allDates.forEach(dt => {
-        if (dt < pp.start || dt > pp.end) return;
-        const day = new Date(dt + 'T00:00:00').getDay();
-        if (day < 1 || day > 5) return;
-        if (workedDates[s.id].has(dt))    shifts++;
-        if (unavailDates[s.id].has(dt))   unavailCount++;
-      });
-      return { shifts, unavailCount, total: shifts + unavailCount };
-    });
-  });
-
-  const getWeekColor = (count, fte) => {
-    if (count === 0) return '#f8fafc';
-    const max = weeklyMax(fte);
-    if (count > max)   return '#fee2e2';
-    if (count === max) return '#f0fdf4';
-    return '#fffbeb';
-  };
-
-  const getPPColor = (total, fte) => {
-    const target = fteTarget(fte);
-    if (total === target) return '#f0fdf4';
-    if (total > target)   return '#fee2e2';
-    return '#fffbeb';
-  };
+  const coverageSkills = skills.filter(s => s.name !== 'Call');
 
   return (
-    <div className="shift-summary">
-      <div className="shift-summary-header">
-        <h3>Shifts Per Staff Per Week</h3>
-        <div className="shift-summary-legend">
-          <span className="ss-legend-item" style={{background:'#f0fdf4'}}>on target</span>
-          <span className="ss-legend-item" style={{background:'#fffbeb'}}>under</span>
-          <span className="ss-legend-item" style={{background:'#fee2e2'}}>over</span>
+    <div className="skill-coverage">
+      <div className="skill-coverage-header">
+        <h3>Skill Coverage by Day</h3>
+        <div className="skill-coverage-legend">
+          <span className="sc-legend-item" style={{background:'#f0fdf4'}}>met</span>
+          <span className="sc-legend-item" style={{background:'#fee2e2'}}>below minimum</span>
         </div>
         <button className="preview-close" onClick={onClose}>×</button>
       </div>
 
-      <div className="shift-summary-scroll">
-        <table className="ss-table">
+      <div className="skill-coverage-scroll">
+        <table className="sc-table">
           <thead>
-            <tr>
-              <th className="ss-name-col">Staff</th>
-              <th className="ss-fte-col">FTE</th>
-              {weeks.map((wk, wi) => (
-                <th key={wi} className="ss-week-col">
-                  Wk {wi + 1}
-                  <div className="ss-week-date">
-                    {new Date(wk[0] + 'T00:00:00').toLocaleDateString('en-US', {month:'numeric', day:'numeric'})}
-                  </div>
+            <tr className="sc-week-row">
+              <th className="sc-skill-col" />
+              {weeks.map((w, wi) => (
+                <th key={wi} colSpan={w.length} className="sc-week-label">
+                  Week {wi + 1} &nbsp;·&nbsp; {getMonthLabel(w[0])}
                 </th>
               ))}
-              {payPeriods.map((pp, pi) => (
-                <th key={pi} className="ss-pp-col">
-                  PP {pi + 1}
-                  <div className="ss-week-date">
-                    {new Date(pp.start + 'T00:00:00').toLocaleDateString('en-US', {month:'numeric', day:'numeric'})}
-                  </div>
+            </tr>
+            <tr>
+              <th className="sc-skill-col">Skill</th>
+              {weekdayDates.map(d => (
+                <th key={d} className="sc-date-col">
+                  <div>{getDayName(d).slice(0, 3)}</div>
+                  <div>{new Date(d + 'T00:00:00').getDate()}</div>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {staff.map(s => (
-              <tr key={s.id}>
-                <td className="ss-name-col">{s.name}</td>
-                <td className="ss-fte-col">{s.fte}</td>
-                {weeklyShifts[s.id].map((count, wi) => (
-                  <td key={wi} className="ss-cell"
-                    style={{ background: getWeekColor(count, s.fte) }}>
-                    {count}
-                  </td>
-                ))}
-                {ppTotals[s.id].map((pp, pi) => (
-                  <td key={pi} className="ss-cell"
-                    style={{ background: getPPColor(pp.total, s.fte),
-                             fontWeight: 700 }}>
-                    {pp.shifts}{pp.unavailCount > 0 ? `+${pp.unavailCount}` : ''}
-                  </td>
-                ))}
+            {coverageSkills.map(skill => (
+              <tr key={skill.id}>
+                <td className="sc-skill-label">{skill.name}</td>
+                {weekdayDates.map(d => {
+                  const count  = (requests[`${d}|${skill.id}`] || []).length;
+                  const target = needs[getDayName(d)]?.[skill.id]?.quantity || 0;
+                  const bg = target === 0 ? '#fafafa'
+                           : count < target ? '#fee2e2'
+                           : '#f0fdf4';
+                  return (
+                    <td key={d} className="sc-cell" style={{ background: bg }}>
+                      {target > 0 ? `${count}/${target}` : (count > 0 ? count : '')}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RotationPanel({ rotationPoints, onClose }) {
+  if (!rotationPoints.length) return (
+    <div className="skill-coverage">
+      <div className="skill-coverage-header">
+        <h3>Rotation Points</h3>
+        <button className="preview-close" onClick={onClose}>×</button>
+      </div>
+      <p style={{ padding: '1rem', color: '#71717a' }}>No rotation data yet. Run the optimizer first.</p>
+    </div>
+  );
+
+  const maxTotal = Math.max(...rotationPoints.map(r => r.ecu_total + r.irc_total + r.ir_late_total));
+  const minTotal = Math.min(...rotationPoints.map(r => r.ecu_total + r.irc_total + r.ir_late_total));
+
+  return (
+    <div className="skill-coverage">
+      <div className="skill-coverage-header">
+        <h3>Rotation Points</h3>
+        <div className="skill-coverage-legend">
+          <span className="sc-legend-item" style={{ background: '#f0fdf4' }}>balanced</span>
+          <span className="sc-legend-item" style={{ background: '#fef9c3' }}>above average</span>
+        </div>
+        <button className="preview-close" onClick={onClose}>×</button>
+      </div>
+      <div className="skill-coverage-scroll">
+        <table className="sc-table">
+          <thead>
+            <tr>
+              <th className="sc-skill-col" rowSpan={2} style={{ verticalAlign: 'bottom' }}>Staff</th>
+              <th colSpan={2} style={{ textAlign: 'center', borderBottom: '1px solid #e4e4e7' }}>ECU</th>
+              <th colSpan={2} style={{ textAlign: 'center', borderBottom: '1px solid #e4e4e7' }}>IRC</th>
+              <th colSpan={2} style={{ textAlign: 'center', borderBottom: '1px solid #e4e4e7' }}>IR Late</th>
+            </tr>
+            <tr>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Block</th>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Total</th>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Block</th>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Total</th>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Block</th>
+              <th style={{ textAlign: 'center', fontSize: '0.7rem' }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rotationPoints.map(row => {
+              const total    = row.ecu_total + row.irc_total + row.ir_late_total;
+              const aboveAvg = maxTotal > minTotal && total > minTotal;
+              const bg       = aboveAvg ? '#fef9c3' : '#f0fdf4';
+              return (
+                <tr key={row.id}>
+                  <td className="sc-skill-label">{row.name}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center' }}>{row.ecu_current}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center', fontWeight: 600, background: bg }}>{row.ecu_total}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center' }}>{row.irc_current}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center', fontWeight: 600, background: bg }}>{row.irc_total}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center' }}>{row.ir_late_current}</td>
+                  <td className="sc-cell" style={{ textAlign: 'center', fontWeight: 600, background: bg }}>{row.ir_late_total}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -221,7 +184,9 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
   const [toasts, setToasts]         = useState([]);
   const [saving, setSaving]         = useState(false);
   const [optimizing, setOptimizing] = useState(false);
-  const [shiftSummary, setShiftSummary] = useState(null);
+  const [shiftSummary, setShiftSummary]   = useState(null);
+  const [rotationPanel, setRotationPanel] = useState(false);
+  const [rotationPoints, setRotationPoints] = useState([]);
   const [fteTiers, setFteTiers]         = useState([]);
   const [publishHistory, setHistory]    = useState([]);
   const [showAudit, setShowAudit]       = useState(false);
@@ -299,20 +264,21 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
     return sorted[sorted.length - 1] || { shifts_per_week: 3, shifts_per_pp: 5 };
   }, [fteTiers]);
 
-  const numPayPeriods = useMemo(() => {
-    if (!block) return 4;
+  const numWeeks = useMemo(() => {
+    if (!block) return 8;
     const start = new Date(block.start_date + 'T00:00:00');
     const end   = new Date(block.end_date   + 'T00:00:00');
-    const anchor = new Date(start);
-    anchor.setDate(anchor.getDate() - start.getDay());
-    let count = 0, ps = new Date(anchor);
-    while (ps <= end) { count++; ps.setDate(ps.getDate() + 14); }
+    // Anchor to the Monday of the start week
+    const monday = new Date(start);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    let count = 0, wk = new Date(monday);
+    while (wk <= end) { count++; wk.setDate(wk.getDate() + 7); }
     return count;
   }, [block]);
 
   const maxShifts = useCallback((fte) =>
-    lookupFteTier(fte).shifts_per_pp * numPayPeriods
-  , [lookupFteTier, numPayPeriods]);
+    lookupFteTier(fte).shifts_per_week * numWeeks
+  , [lookupFteTier, numWeeks]);
 
   // Sorted roster: 1.0 FTE first, descending to casual at the bottom
   const sortedStaff = useMemo(() => (
@@ -523,6 +489,7 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
               setShiftSummary(true);
               addToast(`Optimizer applied — ${accepted.added} assignments updated.`, 'success');
               load();
+              fetch(`/api/rotation-points?block_id=${id}`).then(r => r.json()).then(setRotationPoints);
             }
           });
       })
@@ -592,6 +559,15 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
             </button>
             <button className="btn-optimize" onClick={handleOptimize} disabled={optimizing}>
               {optimizing ? 'Optimizing...' : 'Run Optimizer'}
+            </button>
+            <button className="btn-coverage" onClick={() => setShiftSummary(v => !v)}>
+              {shiftSummary ? 'Hide Coverage' : 'Coverage'}
+            </button>
+            <button className="btn-coverage" onClick={() => {
+              if (!rotationPanel) fetch(`/api/rotation-points?block_id=${id}`).then(r => r.json()).then(setRotationPoints);
+              setRotationPanel(v => !v);
+            }}>
+              {rotationPanel ? 'Hide Rotation' : 'Rotation'}
             </button>
             <button className="btn-publish" onClick={handlePublish}>
               {block.status === 'published' ? 'Re-publish' : 'Publish'}
@@ -767,9 +743,10 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
                         const target  = getTarget(d, skill.id);
                         const count   = entries.length;
 
-                        const statusClass = count === 0    ? 'cell-empty'
-                                          : count < target  ? 'cell-under'
-                                          : count === target ? 'cell-met'
+                        const statusClass = count === 0 && target > 0 ? 'cell-unmet'
+                                          : count === 0              ? 'cell-empty'
+                                          : count < target           ? 'cell-under'
+                                          : count === target         ? 'cell-met'
                                           : 'cell-over';
 
                         const targetLabel = target > 0
@@ -891,15 +868,20 @@ export default function BlockGrid({ blockId: propBlockId, readOnly = false }) {
 
       </div>
 
-      {/* Shift summary — shown after optimizer runs */}
+      {/* Skill coverage panel */}
       {shiftSummary && (
-        <ShiftSummaryPanel
+        <SkillCoveragePanel
           requests={requests}
-          unavail={unavail}
-          staff={sortedStaff}
           block={block}
-          fteTiers={fteTiers}
+          skills={skills}
+          needs={needs}
           onClose={() => setShiftSummary(null)}
+        />
+      )}
+      {rotationPanel && (
+        <RotationPanel
+          rotationPoints={rotationPoints}
+          onClose={() => setRotationPanel(false)}
         />
       )}
       </div>

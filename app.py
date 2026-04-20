@@ -12,6 +12,7 @@ import staff
 import schedule_template
 import schedule
 import api
+import import_schedule
 
 
 def create_app():
@@ -45,6 +46,7 @@ def create_app():
     app.register_blueprint(schedule_template.bp)
     app.register_blueprint(schedule.bp)
     app.register_blueprint(api.bp)
+    app.register_blueprint(import_schedule.bp)
 
     limiter.init_app(app)
 

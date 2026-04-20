@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import Blocks from './pages/Blocks';
 import BlockGrid from './pages/BlockGrid';
 import Admin from './pages/Admin';
+import ImportSchedule from './pages/ImportSchedule';
 import Login from './pages/Login';
 import ChangePassword from './pages/ChangePassword';
 import './App.css';
@@ -48,6 +49,7 @@ function Nav({ user, onLogout }) {
       <span className="app-brand">IR Schedule</span>
       <Link to="/">Calendar</Link>
       {isScheduler && <Link to="/blocks">Blocks</Link>}
+      {isScheduler && <Link to="/import">Import</Link>}
       {isAdmin     && <Link to="/admin">Admin</Link>}
       <span className="app-nav-user">{user.username}</span>
       <button className="app-nav-logout" onClick={onLogout}>Sign Out</button>
@@ -102,6 +104,12 @@ export default function App() {
           <Route path="/blocks/:id" element={
             <RoleRoute user={user} allowedRoles={['admin', 'scheduler']}>
               <BlockGrid />
+            </RoleRoute>
+          } />
+
+          <Route path="/import" element={
+            <RoleRoute user={user} allowedRoles={['admin', 'scheduler']}>
+              <ImportSchedule />
             </RoleRoute>
           } />
 

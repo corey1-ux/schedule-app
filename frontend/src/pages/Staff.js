@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './Staff.css';
 
 const FTE_OPTIONS = [
@@ -8,12 +8,40 @@ const FTE_OPTIONS = [
   { value: 1.0,  label: '1.0',  detail: '4 shifts/wk · 8/PP' },
 ];
 
+// Three-dot menu for each staff row
+function KebabMenu({ onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  return (
+    <div className="sf-kebab-wrap" ref={ref}>
+      <button className="sf-kebab-btn" onClick={() => setOpen(o => !o)} title="Actions">⋮</button>
+      {open && (
+        <div className="sf-kebab-menu">
+          <button onClick={() => { onEdit(); setOpen(false); }}>Edit</button>
+          <button className="sf-kebab-delete" onClick={() => { onDelete(); setOpen(false); }}>Delete</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StaffForm({ initial, skills, onSave, onCancel }) {
-  const [name, setName]           = useState(initial?.name || '');
-  const [isCasual, setIsCasual]   = useState(initial?.is_casual ?? false);
-  const [fte, setFte]             = useState(initial?.fte ?? 1.0);
-  const [selectedSkills, setSelected] = useState(
-    initial?.skills?.map(s => s.id) || []
+  const [name, setName]               = useState(initial?.name || '');
+  const [isCasual, setIsCasual]       = useState(initial?.is_casual ?? false);
+  const [fte, setFte]                 = useState(initial?.fte ?? 1.0);
+  const [selectedSkills, setSelected] = useState(initial?.skills?.map(s => s.id) || []);
+  // minimums keyed by skill id (integer)
+  const [minimums, setMinimums] = useState(
+    Object.fromEntries(
+      Object.entries(initial?.skill_minimums || {}).map(([k, v]) => [parseInt(k, 10), v])
+    )
   );
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
@@ -21,16 +49,26 @@ function StaffForm({ initial, skills, onSave, onCancel }) {
   const toggleSkill = (id) =>
     setSelected(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
 
+  const setMin = (skillId, val) =>
+    setMinimums(prev => ({ ...prev, [skillId]: parseInt(val, 10) || 0 }));
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim()) { setError('Name is required.'); return; }
     setSaving(true);
     setError('');
+    // Only send non-zero minimums for currently selected skills
+    const skill_minimums = Object.fromEntries(
+      selectedSkills
+        .filter(id => (minimums[id] ?? 0) > 0)
+        .map(id => [id, minimums[id]])
+    );
     const res = await onSave({
-      name:      name.trim(),
-      fte:       parseFloat(fte),
-      is_casual: isCasual,
-      skill_ids: selectedSkills,
+      name:           name.trim(),
+      fte:            parseFloat(fte),
+      is_casual:      isCasual,
+      skill_ids:      selectedSkills,
+      skill_minimums,
     });
     if (res?.error) { setError(res.error); setSaving(false); }
   };
@@ -106,6 +144,25 @@ function StaffForm({ initial, skills, onSave, onCancel }) {
             ))}
           </div>
         </div>
+
+        {selectedSkills.length > 0 && (
+          <div className="sf-field">
+            <label className="sf-label">Min / Week</label>
+            <div className="sf-minimums-group">
+              {skills.filter(s => selectedSkills.includes(s.id)).map(s => (
+                <div key={s.id} className="sf-minimum-row">
+                  <span className="sf-minimum-label">{s.name}</span>
+                  <input
+                    type="number" min="0" max="7"
+                    className="sf-minimum-input"
+                    value={minimums[s.id] ?? 0}
+                    onChange={e => setMin(s.id, e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <p className="sf-error">{error}</p>}
@@ -424,20 +481,10 @@ export default function Staff(props) {
                           <button className="sf-btn-ghost" onClick={() => setDeleteId(null)}>Cancel</button>
                         </span>
                       ) : (
-                        <>
-                          <button
-                            className={`sf-btn-ghost ${editId === s.id ? 'sf-active' : ''}`}
-                            onClick={() => openEdit(s.id)}
-                          >
-                            {editId === s.id ? 'Cancel' : 'Edit'}
-                          </button>
-                          <button
-                            className="sf-btn-ghost sf-btn-destruct"
-                            onClick={() => setDeleteId(s.id)}
-                          >
-                            Delete
-                          </button>
-                        </>
+                        <KebabMenu
+                          onEdit={() => openEdit(s.id)}
+                          onDelete={() => setDeleteId(s.id)}
+                        />
                       )}
                     </td>
                   </tr>

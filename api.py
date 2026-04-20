@@ -311,12 +311,17 @@ def get_staff():
                 WHERE ss.staff_id = ?
                 ORDER BY sk.name
             """, (s["id"],)).fetchall()
+            min_rows = conn.execute(
+                "SELECT skill_id, min_per_week FROM staff_skill_minimums WHERE staff_id = ?",
+                (s["id"],)
+            ).fetchall()
             result.append({
-                "id":        s["id"],
-                "name":      s["name"],
-                "fte":       s["fte"],
-                "is_casual": bool(s["is_casual"]),
-                "skills":    [{"id": sk["id"], "name": sk["name"]} for sk in skill_rows],
+                "id":              s["id"],
+                "name":            s["name"],
+                "fte":             s["fte"],
+                "is_casual":       bool(s["is_casual"]),
+                "skills":          [{"id": sk["id"], "name": sk["name"]} for sk in skill_rows],
+                "skill_minimums":  {str(r["skill_id"]): r["min_per_week"] for r in min_rows},
             })
     return jsonify(result)
 
@@ -367,6 +372,7 @@ def update_staff(staff_id):
                 raise ValueError
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid FTE value"}), 400
+    skill_minimums = data.get("skill_minimums", {})
     with get_db() as conn:
         conn.execute(
             "UPDATE staff SET name=?, fte=?, is_casual=? WHERE id=?",
@@ -375,6 +381,14 @@ def update_staff(staff_id):
         conn.execute("DELETE FROM staff_skills WHERE staff_id=?", (staff_id,))
         for sid in skill_ids:
             conn.execute("INSERT INTO staff_skills (staff_id, skill_id) VALUES (?, ?)", (staff_id, sid))
+        conn.execute("DELETE FROM staff_skill_minimums WHERE staff_id=?", (staff_id,))
+        for skill_id_str, min_pw in skill_minimums.items():
+            min_pw = int(min_pw)
+            if min_pw > 0:
+                conn.execute(
+                    "INSERT INTO staff_skill_minimums (staff_id, skill_id, min_per_week) VALUES (?, ?, ?)",
+                    (staff_id, int(skill_id_str), min_pw)
+                )
         conn.commit()
     return jsonify({"ok": True})
 
@@ -738,6 +752,76 @@ def _fte_target(fte, tier_rows):
 
 
 # ── FTE tiers ─────────────────────────────────────────────────────────────────
+
+@bp.route("/rotation-points")
+@api_login_required
+def get_rotation_points():
+    block_id = request.args.get('block_id', type=int)
+    with get_db() as conn:
+        end_date = None
+        if block_id:
+            row = conn.execute(
+                "SELECT end_date FROM schedule_blocks WHERE id = ?", (block_id,)
+            ).fetchone()
+            if row:
+                end_date = row["end_date"]
+
+        # Staff who have ECU, IRC, or IR Late plus at least one other schedulable skill
+        staff_rows = conn.execute("""
+            SELECT s.id, s.name FROM staff s
+            WHERE (s.is_casual = 0 OR s.is_casual IS NULL)
+              AND EXISTS (
+                  SELECT 1 FROM staff_skills ss JOIN skills sk ON sk.id = ss.skill_id
+                  WHERE ss.staff_id = s.id AND sk.name IN ('ECU', 'IRC', 'IR Late')
+              )
+              AND EXISTS (
+                  SELECT 1 FROM staff_skills ss2 JOIN skills sk2 ON sk2.id = ss2.skill_id
+                  WHERE ss2.staff_id = s.id AND sk2.name NOT IN ('ECU', 'IRC', 'IR Late', 'Call')
+              )
+            ORDER BY s.name
+        """).fetchall()
+
+        result = []
+        for s in staff_rows:
+            sid = s["id"]
+
+            def block_count(table, col):
+                if not block_id:
+                    return 0
+                r = conn.execute(
+                    f"SELECT {col} FROM {table} WHERE block_id = ? AND staff_id = ?",
+                    (block_id, sid)
+                ).fetchone()
+                return r[col] if r else 0
+
+            def total_count(table, col):
+                if end_date:
+                    r = conn.execute(f"""
+                        SELECT COALESCE(SUM(t.{col}), 0) AS n
+                        FROM {table} t JOIN schedule_blocks b ON b.id = t.block_id
+                        WHERE t.staff_id = ? AND b.end_date <= ?
+                    """, (sid, end_date)).fetchone()
+                else:
+                    r = conn.execute(
+                        f"SELECT COALESCE(SUM({col}), 0) AS n FROM {table} WHERE staff_id = ?",
+                        (sid,)
+                    ).fetchone()
+                return r["n"] if r else 0
+
+            result.append({
+                "id":               sid,
+                "name":             s["name"],
+                "ecu_current":      block_count("ecu_block_assignments",     "ecu_count"),
+                "ecu_total":        total_count("ecu_block_assignments",     "ecu_count"),
+                "irc_current":      block_count("irc_block_assignments",     "irc_count"),
+                "irc_total":        total_count("irc_block_assignments",     "irc_count"),
+                "ir_late_current":  block_count("ir_late_block_assignments", "ir_late_count"),
+                "ir_late_total":    total_count("ir_late_block_assignments", "ir_late_count"),
+            })
+
+        result.sort(key=lambda r: r["ecu_total"] + r["irc_total"] + r["ir_late_total"])
+    return jsonify(result)
+
 
 @bp.route("/fte-tiers")
 @api_login_required

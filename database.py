@@ -172,6 +172,24 @@ def init_blocks_db():
                 skill_id      INTEGER PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
                 minimum_count INTEGER NOT NULL DEFAULT 1
             );
+            CREATE TABLE IF NOT EXISTS ecu_block_assignments (
+                block_id  INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id  INTEGER NOT NULL REFERENCES staff(id)  ON DELETE CASCADE,
+                ecu_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (block_id, staff_id)
+            );
+            CREATE TABLE IF NOT EXISTS irc_block_assignments (
+                block_id  INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id  INTEGER NOT NULL REFERENCES staff(id)  ON DELETE CASCADE,
+                irc_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (block_id, staff_id)
+            );
+            CREATE TABLE IF NOT EXISTS staff_skill_minimums (
+                staff_id     INTEGER NOT NULL REFERENCES staff(id)  ON DELETE CASCADE,
+                skill_id     INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                min_per_week INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (staff_id, skill_id)
+            );
             CREATE TABLE IF NOT EXISTS staff_block_config (
                 block_id       INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
                 staff_id       INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
@@ -194,6 +212,12 @@ def init_blocks_db():
                 block_id      INTEGER PRIMARY KEY REFERENCES schedule_blocks(id) ON DELETE CASCADE,
                 snapshot_json TEXT    NOT NULL,
                 published_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS ir_late_block_assignments (
+                block_id       INTEGER NOT NULL REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+                staff_id       INTEGER NOT NULL REFERENCES staff(id)  ON DELETE CASCADE,
+                ir_late_count  INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (block_id, staff_id)
             );
         """)
 

@@ -193,19 +193,17 @@ function SkillsTab() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function TemplateTab() {
-  const [skills,       setSkills]       = useState([]);
-  const [needs,        setNeeds]        = useState({});   // { day: { skill_id: qty } }
-  const [dayPriority,  setDayPriority]  = useState({});   // { day: priority }
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-  const [saved,        setSaved]        = useState(false);
+  const [skills,  setSkills]  = useState([]);
+  const [needs,   setNeeds]   = useState({});   // { day: { skill_id: qty } }
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
 
   const load = useCallback(() =>
     Promise.all([
       fetch('/api/skills').then(r => r.json()),
       fetch('/api/template/needs').then(r => r.json()),
-      fetch('/api/day-priorities').then(r => r.json()),
-    ]).then(([sk, n, dp]) => {
+    ]).then(([sk, n]) => {
       setSkills(sk.filter(s => s.name !== 'Call'));
       // Flatten needs to { day: { skill_id: qty } }
       const flat = {};
@@ -216,7 +214,6 @@ function TemplateTab() {
         }
       }
       setNeeds(flat);
-      setDayPriority(dp);
       setLoading(false);
     })
   , []);
@@ -233,14 +230,8 @@ function TemplateTab() {
     setSaved(false);
   };
 
-  const setDp = (day, val) => {
-    setDayPriority(prev => ({ ...prev, [day]: parseInt(val, 10) || 0 }));
-    setSaved(false);
-  };
-
   const handleSave = async () => {
     setSaving(true); setSaved(false);
-    // Build rows array
     const rows = [];
     for (const day of WEEKDAYS) {
       for (const sk of skills) {
@@ -248,16 +239,10 @@ function TemplateTab() {
         if (qty > 0) rows.push({ day, skill_id: sk.id, quantity: qty });
       }
     }
-    await Promise.all([
-      fetch('/api/template/needs', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rows),
-      }),
-      fetch('/api/day-priorities', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dayPriority),
-      }),
-    ]);
+    await fetch('/api/template/needs', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rows),
+    });
     setSaving(false); setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -269,9 +254,7 @@ function TemplateTab() {
       <div className="adm-section-header">
         <div>
           <h2 className="adm-section-title">Weekly Template</h2>
-          <p className="adm-section-sub">
-            Set how many staff are needed per skill per day. Day priority (1=highest) affects the optimizer's weighting.
-          </p>
+          <p className="adm-section-sub">Set how many staff are needed per skill per day.</p>
         </div>
       </div>
 
@@ -285,24 +268,6 @@ function TemplateTab() {
               </tr>
             </thead>
             <tbody>
-              {/* Day priority row */}
-              <tr className="adm-priority-row">
-                <td style={{ textAlign: 'left' }}>
-                  <span className="adm-priority-label">Day priority</span>
-                </td>
-                {WEEKDAYS.map(d => (
-                  <td key={d}>
-                    <span className="adm-priority-label">priority</span>
-                    <input
-                      className="adm-priority-input"
-                      type="number" min="0" max="9"
-                      value={dayPriority[d] ?? 0}
-                      onChange={e => setDp(d, e.target.value)}
-                    />
-                  </td>
-                ))}
-              </tr>
-
               {/* One row per skill */}
               {skills.map(sk => (
                 <tr key={sk.id}>

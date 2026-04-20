@@ -70,6 +70,19 @@
 .btn-optimize:hover    { background: #27272a; }
 .btn-optimize:disabled { background: #a1a1aa; cursor: default; }
 
+.btn-coverage {
+  background: #f1f5f9;
+  color: #3f3f46;
+  border: 1px solid #e4e4e7;
+  padding: 0.4375rem 0.875rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-coverage:hover { background: #e2e8f0; }
+
 .btn-publish {
   background: #09090b;
   color: #fafafa;
@@ -425,6 +438,7 @@
 
 .cell-closed        { background: #fafafa; }
 .cell-empty         { background: #fff; }
+.cell-unmet         { background: #fee2e2; }
 .cell-under         { background: #fffbeb; }
 .cell-met           { background: #f0fdf4; }
 .cell-over          { background: #eff6ff; }
@@ -640,8 +654,8 @@
 .audit-chip-added   { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
 .audit-chip-removed { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
 
-/* ── Shift Summary Panel ─────────────────────────────────────────── */
-.shift-summary {
+/* ── Skill Coverage Panel ────────────────────────────────────────── */
+.skill-coverage {
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 0.625rem;
@@ -649,7 +663,7 @@
   margin-bottom: 1rem;
 }
 
-.shift-summary-header {
+.skill-coverage-header {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -657,20 +671,20 @@
   flex-wrap: wrap;
 }
 
-.shift-summary-header h3 {
+.skill-coverage-header h3 {
   font-size: 0.9375rem;
   font-weight: 600;
   color: #09090b;
   margin: 0;
 }
 
-.shift-summary-legend {
+.skill-coverage-legend {
   display: flex;
   gap: 0.5rem;
   font-size: 0.72rem;
 }
 
-.ss-legend-item {
+.sc-legend-item {
   padding: 2px 8px;
   border-radius: 0.25rem;
   border: 1px solid #e4e4e7;
@@ -678,24 +692,38 @@
   color: #52525b;
 }
 
-.shift-summary-scroll { overflow-x: auto; }
-
-.ss-table {
-  border-collapse: collapse;
-  font-size: 0.78rem;
-  width: 100%;
+.skill-coverage-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 420px;
 }
 
-.ss-table th,
-.ss-table td {
+.sc-table {
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.sc-table th,
+.sc-table td {
   border: 1px solid #e4e4e7;
   text-align: center;
   padding: 0;
 }
 
-.ss-name-col {
+.sc-skill-col {
   text-align: left !important;
-  padding: 6px 10px !important;
+  padding: 4px 10px !important;
+  background: #fafafa;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 90px;
+}
+
+.sc-skill-label {
+  text-align: left;
+  padding: 5px 10px !important;
   font-weight: 600;
   color: #09090b;
   white-space: nowrap;
@@ -703,56 +731,34 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  min-width: 130px;
+  min-width: 90px;
 }
 
-.ss-fte-col {
-  padding: 6px 8px !important;
-  color: #71717a;
-  background: #fafafa;
-  min-width: 45px;
-}
+.sc-week-row th { border-bottom: 2px solid #e4e4e7; }
 
-.ss-week-col {
+.sc-week-label {
   padding: 4px 6px !important;
   background: #09090b;
-  color: #71717a;
+  color: #a1a1aa;
   font-size: 0.65rem;
   font-weight: 600;
   min-width: 48px;
 }
 
-.ss-week-date {
-  font-size: 0.58rem;
-  color: #52525b;
-  font-weight: 400;
+.sc-date-col {
+  padding: 3px 4px !important;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  min-width: 38px;
+  background: #fafafa;
 }
 
-.ss-cell {
-  padding: 6px 4px !important;
+.sc-cell {
+  padding: 5px 4px !important;
   font-weight: 600;
+  font-size: 0.78rem;
   color: #3f3f46;
-  min-width: 48px;
-}
-
-.ss-total-col {
-  padding: 6px 8px !important;
-  font-weight: 700;
-  min-width: 48px;
-}
-
-.ss-total-col.met   { background: #f0fdf4; color: #166534; }
-.ss-total-col.under { background: #fef3c7; color: #92400e; }
-.ss-total-col.over  { background: #fef2f2; color: #991b1b; }
-
-.ss-pp-col {
-  padding: 4px 6px !important;
-  background: #27272a;
-  color: #71717a;
-  font-size: 0.65rem;
-  font-weight: 600;
-  min-width: 56px;
-  border-left: 2px solid #09090b !important;
+  min-width: 38px;
 }
 
 /* ── Preview panel ───────────────────────────────────────────────── */
