@@ -1,0 +1,64 @@
+[33mcommit 6e392482697922455c3105707cbd867fed956529[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Sun Apr 19 18:19:04 2026 -0700
+
+    Changed to greedy algorithm.
+
+[33mcommit d7109d2686aceff48b1f699034650c6377e688c7[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Sun Apr 19 18:08:18 2026 -0700
+
+    changed to greedy algorithm.
+
+[33mcommit 201419e2bf471b2dc9165e605080e3bae576272c[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Fri Apr 17 21:46:03 2026 -0700
+
+    Added drag and drop tiles, changed CSS, and added views.
+
+[33mcommit 85d8194bfe5a6c2b31dc8126fa4efffd68e312c4[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Fri Apr 17 09:44:38 2026 -0700
+
+    Stop tracking __pycache__
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+[33mcommit cc5453ba08d6c811752545d2f8d1e3958eb5045f[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Fri Apr 17 09:43:44 2026 -0700
+
+    Stop tracking database file
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+[33mcommit f8d9afd64c2f3d73b3374c2308db9d5d56063aae[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Fri Apr 17 09:41:37 2026 -0700
+
+    Track frontend as regular files, add .gitignore, restore backend modules
+    
+    - Remove nested frontend/.git so React source is tracked by parent repo
+    - Add .gitignore (secrets, venv, __pycache__, *.db, node_modules, build)
+    - Restore auth.py, api.py, app.py, database.py, main.py to working versions
+    - Add limiter.py and optimizer.py (were missing after revert)
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+[33mcommit 6d76c14b018447d8ed5a1be74b406c5382b56e76[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Tue Apr 7 20:31:20 2026 -0700
+
+    Refactor
+
+[33mcommit 854715c36612da5481ee6994c4866508a56ab52b[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Tue Apr 7 08:24:08 2026 -0700
+
+    first commit
+
+[33mcommit 38967ec6c5d46552a187f80403dee931624c2fe3[m
+Author: Corey Sigler <coreysigler@gmail.com>
+Date:   Tue Apr 7 08:19:31 2026 -0700
+
+    react calendar  + flask backend
