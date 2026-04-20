@@ -38,3 +38,5 @@ Thumbs.db
 
 # Claude memory
 .claude/
+
+google_credentials.json
